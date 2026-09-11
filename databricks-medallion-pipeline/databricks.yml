@@ -1,0 +1,43 @@
+bundle:
+  name: my-databricks-project
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+
+variables:
+  cluster_id:
+    description: Existing cluster used by the project jobs
+    default: "<your-cluster-id>"
+  output_dir:
+    description: Persistent destination for generated JSON Lines files
+    default: /Volumes/databricks_course_ws_new/landing/events_volume
+  num_files:
+    description: Number of JSON files generated in each producer run
+    default: "5"
+
+resources:
+  jobs:
+    producer_simulator:
+      name: ${bundle.name}-${bundle.target}-producer
+      tasks:
+        - task_key: generate_landing_events
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: src/producer/producer_simulator.py
+            parameters:
+              - --output-dir
+              - ${var.output_dir}
+              - --num-files
+              - ${var.num_files}
+
+    bronze_ingestion:
+      name: ${bundle.name}-${bundle.target}-bronze
+      tasks:
+        - task_key: ingest_bronze
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: notebooks/ingest_bronze.py
