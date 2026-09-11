@@ -94,7 +94,8 @@ class PipelineAudit:
 
     def write_batch(self, batch_id, started_at, finished_at, status,
                     files_processed, records_read, records_inserted,
-                    schema_drift_records, error_message=None):
+                    schema_drift_records, records_rejected=0,
+                    error_message=None):
         records = [{
             "audit_id": str(uuid4()),
             "run_id": self.run_id,
@@ -108,7 +109,7 @@ class PipelineAudit:
             "files_processed": files_processed,
             "records_read": records_read,
             "records_inserted": records_inserted,
-            "records_rejected": 0,
+            "records_rejected": records_rejected,
             "schema_drift_records": schema_drift_records,
             "error_message": error_message,
         }]
@@ -125,7 +126,10 @@ class PipelineAudit:
             "processed_at": processed_at,
             "status": status,
             "records_read": metrics["records_read"],
-            "records_inserted": metrics["records_read"] if status == "SUCCESS" else 0,
+            "records_inserted": metrics.get(
+                "records_inserted",
+                metrics["records_read"] if status == "SUCCESS" else 0,
+            ),
             "schema_drift_records": metrics["schema_drift_records"],
             "error_message": error_message,
         } for metrics in file_metrics]

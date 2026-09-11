@@ -23,6 +23,8 @@ Recursos atuais no Unity Catalog:
 ```text
 databricks_course_ws_new.landing.events_volume
 databricks_course_ws_new.bronze.spotify_events_raw
+databricks_course_ws_new.silver.spotify_events
+databricks_course_ws_new.silver.spotify_events_quarantine
 databricks_course_ws_new.ops.checkpoints_volume
 databricks_course_ws_new.ops.pipeline_audit
 databricks_course_ws_new.ops.file_audit
@@ -63,9 +65,9 @@ O modo `rescue` trata alterações de schema compatíveis com essa estratégia, 
 
 O produtor gera um `batch_id` único para cada arquivo e usa a combinação desse identificador com o índice do registro para formar o `event_id`. Assim, eventos de arquivos diferentes não colidem, enquanto a duplicata intencional mantém o mesmo `event_id` e pode ser deduplicada na Silver.
 
-## Contrato preliminar da Silver
+## Silver e quarentena
 
-A tabela prevista para a camada Silver é:
+A tabela tratada da camada Silver é:
 
 ```text
 databricks_course_ws_new.silver.spotify_events
@@ -85,7 +87,7 @@ _ingested_at
 _source_file
 ```
 
-Critérios definidos para o tratamento:
+Critérios implementados no tratamento:
 
 - `duration_played_sec` será convertido para inteiro quando possível;
 - valores inválidos ou fora do domínio, como durações negativas, serão direcionados para quarentena;
@@ -97,7 +99,7 @@ Critérios definidos para o tratamento:
 - `track_id`, `timestamp` e `event_id` serão considerados campos essenciais para identificar o evento e seu contexto;
 - `_rescued_data` será preservado ou encaminhado para tratamento específico, sem descarte silencioso.
 
-Ainda precisam ser definidos antes da implementação da Silver o formato da tabela de quarentena, a regra final para desempate de duplicatas conflitantes e o tratamento de timestamps atrasados ou futuros.
+Os registros rejeitados são preservados em `databricks_course_ws_new.silver.spotify_events_quarantine` com o motivo do descarte. A implementação está em [notebooks/silver_transform.py](notebooks/silver_transform.py) e reutiliza o utilitário de auditoria.
 
 ## Auditoria
 
@@ -128,6 +130,12 @@ Execute a ingestão Bronze:
 databricks bundle run bronze_ingestion -t dev
 ```
 
+Execute a transformação Silver:
+
+```powershell
+databricks bundle run silver_transformation -t dev
+```
+
 O job usa o cluster configurado na variável `cluster_id` em [databricks.yml](databricks.yml).
 
 ## Ambiente local
@@ -141,14 +149,11 @@ py -3.12 -m py_compile .\src\producer\producer_simulator.py
 
 O botão `Run` do VS Code executa o produtor localmente. Para executar no cluster Databricks, use `databricks bundle run`.
 
-## Próximas camadas
+## Próximas etapas
 
-Silver e Gold ainda não estão implementadas. Antes da Silver, é necessário definir e validar seu contrato:
+O fluxo Bronze e Silver está implementado. As próximas evoluções são:
 
-- formato da tabela de quarentena;
-- regra de desempate para duplicidades conflitantes;
-- validação e classificação de timestamps atrasados ou futuros;
-- tratamento de campos vazios em `track_id` e `platform`;
-- tratamento final de `_rescued_data`;
-- checkpoint e estratégia incremental;
-- métricas de auditoria específicas da transformação.
+- implementar a camada Gold com métricas de interesse musical;
+- adicionar Expectations no projeto Databricks Free Edition;
+- incluir métricas de rejeição por arquivo na auditoria detalhada;
+- criar testes automatizados para as regras da Silver.

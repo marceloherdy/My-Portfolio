@@ -41,3 +41,11 @@ resources:
           existing_cluster_id: ${var.cluster_id}
           spark_python_task:
             python_file: notebooks/ingest_bronze.py
+
+    silver_transformation:
+      name: ${bundle.name}-${bundle.target}-silver
+      tasks:
+        - task_key: transform_silver
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: notebooks/silver_transform.py

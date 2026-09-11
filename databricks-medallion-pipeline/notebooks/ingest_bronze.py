@@ -7,8 +7,8 @@ from utils.audit import PipelineAudit
 
 # Caminhos de entrada, estado operacional e tabela de destino no Unity Catalog.
 volume_path = "/Volumes/databricks_course_ws_new/landing/events_volume"
-checkpoint_path = "/Volumes/databricks_course_ws_new/ops/checkpoints_volume/spotify_events"
-schema_location = "/Volumes/databricks_course_ws_new/ops/checkpoints_volume/schema/spotify_events"
+checkpoint_path = "/Volumes/databricks_course_ws_new/ops/checkpoints_volume/spotify_events_v2"
+schema_location = "/Volumes/databricks_course_ws_new/ops/checkpoints_volume/schema/spotify_events_v2"
 target_table = "databricks_course_ws_new.bronze.spotify_events_raw"
 audit_table = "databricks_course_ws_new.ops.pipeline_audit"
 file_audit_table = "databricks_course_ws_new.ops.file_audit"
