@@ -1,5 +1,5 @@
 bundle:
-  name: my-databricks-project
+  name: databricks-medallion-pipeline
 
 targets:
   dev:

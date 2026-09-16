@@ -285,7 +285,7 @@ wheels = [
 ]
 
 [[package]]
-name = "my-databricks-project"
+name = "databricks-medallion-pipeline"
 version = "0.0.0"
 source = { virtual = "." }
 

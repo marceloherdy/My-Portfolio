@@ -1,10 +1,20 @@
+import inspect
+import os
+import sys
 from traceback import format_exc
+
+# Databricks executa spark_python_task via exec(compile(...)) num kernel, sem
+# definir __file__. O caminho real do arquivo continua acessível via co_filename.
+_this_file = inspect.currentframe().f_code.co_filename
+sys.path.append(os.path.join(os.path.dirname(_this_file), "..", "src"))
 
 from databricks.sdk.runtime import spark
 from delta.tables import DeltaTable
 from pyspark.sql import functions as F
-from pyspark.sql.window import Window
-from utils.audit import PipelineAudit
+
+from pipeline.audit import PipelineAudit
+from pipeline.metrics import compute_file_metrics
+from pipeline.silver import build_quarantine_rows, dedupe_valid_records, normalize_batch
 
 bronze_table = "databricks_course_ws_new.bronze.spotify_events_raw"
 silver_table = "databricks_course_ws_new.silver.spotify_events"
@@ -55,41 +65,7 @@ audit = PipelineAudit(
     file_audit_table=file_audit_table,
 )
 audit.ensure_tables()
-
-
-def normalize_batch(batch_df):
-    current_time = F.current_timestamp()
-    normalized = (
-        batch_df
-        .withColumn("event_id", F.trim(F.col("event_id")))
-        .withColumn("track_id", F.trim(F.col("track_id")))
-        .withColumn("platform", F.trim(F.col("platform")))
-        .withColumn("duration_played_sec_int", F.expr("try_cast(duration_played_sec AS INT)"))
-        .withColumn(
-            "event_timestamp_parsed",
-            F.to_timestamp("timestamp", "yyyy-MM-dd'T'HH:mm:ssZ"),
-        )
-        .withColumn(
-            "rejection_reason",
-            F.concat_ws(
-                "; ",
-                F.when(F.col("event_id").isNull() | (F.col("event_id") == ""), "INVALID_EVENT_ID"),
-                F.when(F.col("track_id").isNull() | (F.col("track_id") == ""), "INVALID_TRACK_ID"),
-                F.when(F.col("platform").isNull() | (F.col("platform") == ""), "INVALID_PLATFORM"),
-                F.when(F.col("duration_played_sec_int").isNull(), "INVALID_DURATION"),
-                F.when(F.col("duration_played_sec_int") < 0, "NEGATIVE_DURATION"),
-                F.when(F.col("event_timestamp_parsed").isNull(), "INVALID_TIMESTAMP"),
-            ),
-        )
-        .withColumn(
-            "timestamp_classification",
-            F.when(F.col("event_timestamp_parsed").isNull(), "INVALID")
-            .when(F.col("event_timestamp_parsed") > current_time, "FUTURE")
-            .when(F.col("event_timestamp_parsed") < current_time - F.expr("INTERVAL 1 DAY"), "LATE")
-            .otherwise("ON_TIME"),
-        )
-    )
-    return normalized
+execution_started_at = audit.utc_now()
 
 
 def process_batch(batch_df, batch_id):
@@ -101,37 +77,15 @@ def process_batch(batch_df, batch_id):
     records_rejected = rejected.count()
     schema_drift_records = normalized.filter(F.col("_rescued_data").isNotNull()).count()
 
-    file_metrics = [
-        row.asDict()
-        for row in normalized.groupBy("_source_file").agg(
-            F.count("*").alias("records_read"),
-            F.sum(F.when(F.col("rejection_reason") == "", 1).otherwise(0)).alias("records_inserted"),
-            F.sum(F.when(F.col("_rescued_data").isNotNull(), 1).otherwise(0)).alias("schema_drift_records"),
-        ).withColumnRenamed("_source_file", "source_file").collect()
-    ]
+    file_metrics = compute_file_metrics(
+        normalized,
+        extra_aggs={"records_inserted": F.sum(F.when(F.col("rejection_reason") == "", 1).otherwise(0))},
+    )
 
     try:
-        rejected.select(
-            "event_id", "batch_id", "user_id", "track_id", "platform", "device_type",
-            "duration_played_sec", "timestamp", "_rescued_data", "_ingested_at", "_source_file",
-            "rejection_reason",
-        ).withColumn("rejected_at", F.current_timestamp()).write.format("delta").mode("append").saveAsTable(quarantine_table)
+        build_quarantine_rows(rejected).write.format("delta").mode("append").saveAsTable(quarantine_table)
 
-        rank_window = Window.partitionBy("event_id").orderBy(
-            F.col("_ingested_at").desc(),
-            F.col("_source_file").desc(),
-        )
-        silver_batch = (
-            valid
-            .withColumn("_row_number", F.row_number().over(rank_window))
-            .filter(F.col("_row_number") == 1)
-            .select(
-                "event_id", "user_id", "track_id", "platform", "device_type",
-                F.col("duration_played_sec_int").alias("duration_played_sec"),
-                F.col("event_timestamp_parsed").alias("event_timestamp"),
-                "timestamp_classification", "_rescued_data", "_ingested_at", "_source_file",
-            )
-        )
+        silver_batch = dedupe_valid_records(valid)
 
         target = DeltaTable.forName(spark, silver_table)
         (
@@ -191,5 +145,23 @@ query = (
     .start()
 )
 query.awaitTermination()
+
+# Rastreado pelo Spark no driver, confiável independente de isolamento do
+# foreachBatch (ver mesmo padrão em notebooks/ingest_bronze.py). recentProgress
+# vem como dict neste runtime (Databricks Connect), não como objeto com atributos.
+had_new_data = any(progress["numInputRows"] > 0 for progress in query.recentProgress)
+
+if not had_new_data:
+    execution_finished_at = audit.utc_now()
+    audit.write_batch(
+        batch_id=-1,
+        started_at=execution_started_at,
+        finished_at=execution_finished_at,
+        status="SUCCESS",
+        files_processed=0,
+        records_read=0,
+        records_inserted=0,
+        schema_drift_records=0,
+    )
 
 print(f"Transformação Silver concluída com sucesso para a tabela: {silver_table}")

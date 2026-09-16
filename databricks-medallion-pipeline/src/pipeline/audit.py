@@ -11,6 +11,49 @@ from pyspark.sql.types import (
 )
 
 
+def build_audit_record(run_id, pipeline_name, task_name, target_table, batch_id,
+                        started_at, finished_at, status, files_processed,
+                        records_read, records_inserted, schema_drift_records,
+                        records_rejected=0, error_message=None):
+    return {
+        "audit_id": str(uuid4()),
+        "run_id": run_id,
+        "pipeline_name": pipeline_name,
+        "task_name": task_name,
+        "target_table": target_table,
+        "batch_id": batch_id,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "status": status,
+        "files_processed": files_processed,
+        "records_read": records_read,
+        "records_inserted": records_inserted,
+        "records_rejected": records_rejected,
+        "schema_drift_records": schema_drift_records,
+        "error_message": error_message,
+    }
+
+
+def build_file_audit_records(file_metrics, run_id, batch_id, target_table, status, error_message=None):
+    processed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    return [{
+        "file_audit_id": str(uuid4()),
+        "run_id": run_id,
+        "batch_id": batch_id,
+        "source_file": metrics["source_file"],
+        "target_table": target_table,
+        "processed_at": processed_at,
+        "status": status,
+        "records_read": metrics["records_read"],
+        "records_inserted": metrics.get(
+            "records_inserted",
+            metrics["records_read"] if status == "SUCCESS" else 0,
+        ),
+        "schema_drift_records": metrics["schema_drift_records"],
+        "error_message": error_message,
+    } for metrics in file_metrics]
+
+
 class PipelineAudit:
     """Persiste métricas de execução e de arquivos em tabelas Delta."""
 
@@ -96,43 +139,33 @@ class PipelineAudit:
                     files_processed, records_read, records_inserted,
                     schema_drift_records, records_rejected=0,
                     error_message=None):
-        records = [{
-            "audit_id": str(uuid4()),
-            "run_id": self.run_id,
-            "pipeline_name": self.pipeline_name,
-            "task_name": self.task_name,
-            "target_table": self.target_table,
-            "batch_id": batch_id,
-            "started_at": started_at,
-            "finished_at": finished_at,
-            "status": status,
-            "files_processed": files_processed,
-            "records_read": records_read,
-            "records_inserted": records_inserted,
-            "records_rejected": records_rejected,
-            "schema_drift_records": schema_drift_records,
-            "error_message": error_message,
-        }]
+        records = [build_audit_record(
+            run_id=self.run_id,
+            pipeline_name=self.pipeline_name,
+            task_name=self.task_name,
+            target_table=self.target_table,
+            batch_id=batch_id,
+            started_at=started_at,
+            finished_at=finished_at,
+            status=status,
+            files_processed=files_processed,
+            records_read=records_read,
+            records_inserted=records_inserted,
+            schema_drift_records=schema_drift_records,
+            records_rejected=records_rejected,
+            error_message=error_message,
+        )]
         self.spark.createDataFrame(records, self.pipeline_schema).write.format("delta").mode("append").saveAsTable(self.audit_table)
 
     def write_files(self, file_metrics, batch_id, status, error_message=None):
-        processed_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        records = [{
-            "file_audit_id": str(uuid4()),
-            "run_id": self.run_id,
-            "batch_id": batch_id,
-            "source_file": metrics["source_file"],
-            "target_table": self.target_table,
-            "processed_at": processed_at,
-            "status": status,
-            "records_read": metrics["records_read"],
-            "records_inserted": metrics.get(
-                "records_inserted",
-                metrics["records_read"] if status == "SUCCESS" else 0,
-            ),
-            "schema_drift_records": metrics["schema_drift_records"],
-            "error_message": error_message,
-        } for metrics in file_metrics]
+        records = build_file_audit_records(
+            file_metrics=file_metrics,
+            run_id=self.run_id,
+            batch_id=batch_id,
+            target_table=self.target_table,
+            status=status,
+            error_message=error_message,
+        )
         if records:
             self.spark.createDataFrame(records, self.file_schema).write.format("delta").mode("append").saveAsTable(self.file_audit_table)
 

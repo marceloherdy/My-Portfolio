@@ -54,7 +54,7 @@ Tabela detalhada do processamento. É usada para identificar quais arquivos fora
 ## Comportamentos importantes
 
 - A ingestão utiliza Auto Loader com `availableNow=True`.
-- Quando não há arquivos novos, o pipeline registra uma linha em `pipeline_audit` com contadores iguais a zero e `batch_id = -1`.
+- Quando não há dados novos para processar (arquivos na Bronze, registros pendentes na Silver), o pipeline registra uma linha em `pipeline_audit` com contadores iguais a zero e `batch_id = -1`, para cada camada (Bronze e Silver).
 - O estado do Auto Loader e o schema ficam em volumes operacionais separados do landing.
 - O checkpoint e a transação Delta tornam o processamento reexecutável sem duplicar o mesmo lote.
 - Registros com alterações de schema são preservados na coluna `_rescued_data` da tabela Bronze.

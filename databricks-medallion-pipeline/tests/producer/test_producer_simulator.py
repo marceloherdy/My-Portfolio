@@ -1,0 +1,75 @@
+from datetime import datetime, timezone
+
+from producer.producer_simulator import build_record
+
+# Cada teste cobre uma condição i % N da tabela de cenários em CLAUDE.md (seção
+# "Producer"); build_record(i, ...) é a função pura extraída do loop original.
+BATCH_ID = "batch_test"
+
+
+def _event_timestamp():
+    return datetime.now(timezone.utc)
+
+
+def test_build_record_baseline_is_valid():
+    # i=1 não cai em nenhuma regra i % N -> registro "limpo", usado como referência.
+    record = build_record(1, _event_timestamp(), BATCH_ID)
+    assert record["event_id"] == f"evt_{BATCH_ID}_1"
+    assert record["user_id"] == "usr_101"
+    assert record["track_id"] == "trk_51"
+    assert record["platform"] == "spotify_clone"
+    assert record["duration_played_sec"] == 181
+    assert "device_type" not in record
+
+
+def test_build_record_null_user_id():
+    # i % 3 == 0 e i % 7 != 0 -> mantém a chave com valor nulo
+    record = build_record(3, _event_timestamp(), BATCH_ID)
+    assert record["user_id"] is None
+
+
+def test_build_record_missing_user_id_key():
+    # i % 7 == 0 -> remove a chave inteira
+    record = build_record(7, _event_timestamp(), BATCH_ID)
+    assert "user_id" not in record
+
+
+def test_build_record_schema_drift_device_type():
+    # i % 4 == 0
+    record = build_record(4, _event_timestamp(), BATCH_ID)
+    assert record["device_type"] in {"mobile", "desktop", "smart_tv"}
+
+
+def test_build_record_invalid_duration_type():
+    # i == 9 -> inconsistência de tipo (string no lugar de int)
+    record = build_record(9, _event_timestamp(), BATCH_ID)
+    assert record["duration_played_sec"] == "INVALID_DURATION"
+
+
+def test_build_record_negative_duration():
+    # i % 5 == 0 e i != 0
+    record = build_record(5, _event_timestamp(), BATCH_ID)
+    assert record["duration_played_sec"] == -10
+
+
+def test_build_record_late_timestamp():
+    # i % 6 == 0 e i != 0
+    base = _event_timestamp()
+    record = build_record(6, base, BATCH_ID)
+    parsed = datetime.strptime(record["timestamp"], "%Y-%m-%dT%H:%M:%S%z")
+    assert parsed < base
+
+
+def test_build_record_future_timestamp():
+    # i % 11 == 0 e i % 6 != 0
+    base = _event_timestamp()
+    record = build_record(11, base, BATCH_ID)
+    parsed = datetime.strptime(record["timestamp"], "%Y-%m-%dT%H:%M:%S%z")
+    assert parsed > base
+
+
+def test_build_record_empty_track_and_platform():
+    # i % 10 == 0 e i != 0
+    record = build_record(10, _event_timestamp(), BATCH_ID)
+    assert record["track_id"] == ""
+    assert record["platform"] == ""
