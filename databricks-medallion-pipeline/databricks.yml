@@ -49,3 +49,19 @@ resources:
           existing_cluster_id: ${var.cluster_id}
           spark_python_task:
             python_file: notebooks/silver_transform.py
+
+    gold_aggregation:
+      name: ${bundle.name}-${bundle.target}-gold
+      tasks:
+        - task_key: pipeline_run_health
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: notebooks/gold_pipeline_run_health.py
+        - task_key: file_processing_latency
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: notebooks/gold_file_processing_latency.py
+        - task_key: data_quality_summary
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: notebooks/gold_data_quality_summary.py

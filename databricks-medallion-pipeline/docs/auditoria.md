@@ -54,7 +54,8 @@ Tabela detalhada do processamento. É usada para identificar quais arquivos fora
 ## Comportamentos importantes
 
 - A ingestão utiliza Auto Loader com `availableNow=True`.
-- Quando não há dados novos para processar (arquivos na Bronze, registros pendentes na Silver), o pipeline registra uma linha em `pipeline_audit` com contadores iguais a zero e `batch_id = -1`, para cada camada (Bronze e Silver).
+- Quando não há dados novos para processar (arquivos na Bronze, registros pendentes na Silver ou na Gold), o pipeline registra uma linha em `pipeline_audit` com contadores iguais a zero e `batch_id = -1`, para cada camada.
+- O job `gold_aggregation` grava em `pipeline_audit` com 4 `task_name` diferentes (`gold_pipeline_run_health`, `gold_file_processing_latency`, `gold_quality_rejection_reasons`, `gold_quality_timestamp_classification` — a task `data_quality_summary` do bundle roda duas streams/auditorias independentes), mas nunca em `file_audit` (agregam tabelas, não arquivos).
 - O estado do Auto Loader e o schema ficam em volumes operacionais separados do landing.
 - O checkpoint e a transação Delta tornam o processamento reexecutável sem duplicar o mesmo lote.
 - Registros com alterações de schema são preservados na coluna `_rescued_data` da tabela Bronze.

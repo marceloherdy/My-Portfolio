@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Pipeline de engenharia de dados no Azure Databricks (Unity Catalog + Databricks Asset Bundles) que simula uma plataforma de streaming de música. Um producer Python gera arquivos JSON Lines "sujos" de propósito (nulos, chaves ausentes, schema drift, tipos inconsistentes, duplicatas conflitantes, timestamps atrasados/futuros) para exercitar resiliência, rastreabilidade e governança em um Lakehouse com arquitetura Medalhão.
 
 ```text
-Producer Python -> Volume landing -> Bronze (Auto Loader) -> Silver (dedup + quarentena) -> Gold (futuro)
+Producer Python -> Volume landing -> Bronze (Auto Loader) -> Silver (dedup + quarentena) -> Gold (agregações de negócio e de auditoria)
 ```
 
 ## Comandos
@@ -21,6 +21,7 @@ databricks bundle deploy -t dev
 databricks bundle run producer_simulator -t dev
 databricks bundle run bronze_ingestion -t dev
 databricks bundle run silver_transformation -t dev
+databricks bundle run gold_aggregation -t dev
 
 # Ambiente local (Python 3.12, exigido por compatibilidade com Databricks Connect 16.4)
 py -3.12 -m pip install -e .
@@ -46,6 +47,7 @@ Não há linter configurado no projeto.
 | Bronze | `databricks_course_ws_new.bronze.spotify_events_raw` |
 | Silver | `databricks_course_ws_new.silver.spotify_events` |
 | Silver (quarentena) | `databricks_course_ws_new.silver.spotify_events_quarantine` |
+| Gold | `databricks_course_ws_new.gold.pipeline_run_health`, `databricks_course_ws_new.gold.file_processing_latency`, `databricks_course_ws_new.gold.data_quality_summary` |
 | Ops | `databricks_course_ws_new.ops.checkpoints_volume` (Volume), `databricks_course_ws_new.ops.pipeline_audit`, `databricks_course_ws_new.ops.file_audit` |
 
 ### Onde fica cada coisa
@@ -53,9 +55,11 @@ Não há linter configurado no projeto.
 - `src/pipeline/`: lógica de transformação **pura e testável** (sem Spark I/O nas funções principais, exceto SparkSession para DataFrames). O critério de estar aqui não é "isso é reusável entre tabelas/pipelines" — é "isso é determinístico (DataFrame in → DataFrame/dict out) e dá pra testar com pytest sem cluster". `silver.py` é específico da tabela `spotify_events` e mesmo assim vive aqui, porque a separação é entre **domínio** (regras de negócio) e **adapter** (I/O, streaming, Delta) — não entre "genérico" e "específico". `metrics.py` e `audit.py` acabam sendo reusados por Bronze e Silver, mas isso é consequência, não o objetivo da pasta.
 - `notebooks/*.py`: orquestração Spark/streaming (o "adapter") — leitura via Auto Loader/`readStream`, `foreachBatch`, `MERGE` Delta, `writeStream`, chamadas de auditoria. Importam a lógica pura de `src/pipeline/` via `sys.path.append` (ver nota abaixo). Um notebook não deve crescer com regras de negócio testáveis embutidas; se uma lógica nova é determinística e vale testar isoladamente, ela nasce em `src/pipeline/`, mesmo que sirva só àquele notebook.
 - `src/producer/producer_simulator.py`: gerador de dados sintéticos, Python puro (sem Spark).
-- `databricks.yml`: define os 3 jobs do bundle e as variáveis (`cluster_id`, `output_dir`, `num_files`).
+- `databricks.yml`: define os 4 jobs do bundle e as variáveis (`cluster_id`, `output_dir`, `num_files`).
 
-**Import de `src/pipeline` nos notebooks:** os jobs do bundle apontam `spark_python_task` diretamente para os arquivos em `notebooks/`, sem instalar o pacote no cluster. Por isso os notebooks fazem `sys.path.append` para o diretório `src/` antes de importar `pipeline.*`. Localmente, `pip install -e .` resolve o mesmo import para pytest.
+**Import de `src/pipeline` nos notebooks:** os jobs do bundle apontam `spark_python_task` diretamente para os arquivos em `notebooks/`, sem instalar o pacote no cluster. Por isso os notebooks fazem `sys.path.append` para o diretório `src/` antes de importar `pipeline.*`. Localmente, `pip install -e .` resolve o mesmo import para pytest (reinstalar depois de mover/renomear a pasta do projeto — o `.egg-link`/path fica com o caminho antigo).
+
+**`__file__` não existe em `spark_python_task`:** o Databricks executa esses arquivos via `exec(compile(...))` num kernel, sem definir `__file__` no namespace do script. Por isso os notebooks resolvem o próprio caminho com `inspect.currentframe().f_code.co_filename` em vez de `__file__` (equivalente localmente, funciona também em `py_compile`/execução direta).
 
 ### Fluxo Bronze (`notebooks/ingest_bronze.py`)
 
@@ -79,9 +83,21 @@ Regras de negócio (implementadas em `src/pipeline/silver.py`):
 - **Merge na Silver**: `MERGE` Delta condicionado — só atualiza se `source._ingested_at` for mais recente (desempate por `_source_file` em ordem decrescente).
 - Registros rejeitados vão para `spotify_events_quarantine` com `rejection_reason`, nunca são descartados sem rastro.
 
+### Fluxo Gold (job `gold_aggregation`, 3 tasks independentes)
+
+Agregações incrementais (lógica pura em `src/pipeline/gold.py`), todas no mesmo padrão de Bronze/Silver: `readStream` + `foreachBatch` + `trigger(availableNow=True)` + checkpoint próprio + `MERGE` Delta **aditivo** (soma contadores existentes em vez de sobrescrever, já que cada execução processa só o incremento desde a última vez).
+
+- **`notebooks/gold_pipeline_run_health.py`** → `gold.pipeline_run_health`. Lê `ops.pipeline_audit`; agrega por `execution_date, pipeline_name, task_name` (`runs_count`, `success_count`, `failed_count`, `empty_runs_count`, `avg_duration_sec` como média ponderada, somas de registros). Como lê da própria `pipeline_audit` e também escreve nela (sua auditoria), suas próprias execuções entram na agregação da vez seguinte — comportamento esperado, não é loop (cada execução só vê o snapshot da tabela no início do batch).
+- **`notebooks/gold_file_processing_latency.py`** → `gold.file_processing_latency`. Lê `ops.file_audit`; mede a latência entre o timestamp embutido no nome do arquivo (gerado pelo producer, extraído por regex) e `processed_at`. Agrega por `processed_date, target_table`.
+- **`notebooks/gold_data_quality_summary.py`** → `gold.data_quality_summary`. Duas streams independentes (checkpoints separados) escrevendo na mesma tabela em formato longo (`event_date, metric_type, category, records_count`): uma lê `silver.spotify_events_quarantine` e agrega por `rejection_reason` (cada motivo concatenado vira uma linha própria via `explode`/`split`), outra lê `silver.spotify_events` e agrega por `timestamp_classification`.
+
+Nenhuma das tasks Gold grava em `file_audit` (não fazem sentido métricas por arquivo aqui) — só em `pipeline_audit`, incluindo a linha `batch_id = -1` quando não há incremento novo, no mesmo padrão de Bronze/Silver.
+
 ### Auditoria
 
 Duas tabelas (`src/pipeline/audit.py::PipelineAudit`): `pipeline_audit` (uma linha por lote/execução) e `file_audit` (uma linha por arquivo processado). Status usados: `SUCCESS`/`FAILED`. Documentação completa e queries prontas em [docs/auditoria.md](docs/auditoria.md) — não duplicar aqui, só consultar quando precisar investigar uma execução.
+
+**Nota sobre `query.recentProgress`:** usado em todos os notebooks para detectar "sem dados novos" (em vez de um contador Python global, que não sobrevive ao isolamento de processo do `foreachBatch` neste cluster Unity Catalog). Cada elemento vem como `dict` neste runtime (Databricks Connect), não como objeto `StreamingQueryProgress` com atributos — acesse com `progress["numInputRows"]`, não `progress.numInputRows`.
 
 ### Producer (`src/producer/producer_simulator.py`)
 
