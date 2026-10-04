@@ -3,8 +3,8 @@ import os
 import sys
 from traceback import format_exc
 
-# Databricks executa spark_python_task via exec(compile(...)) num kernel, sem
-# definir __file__. O caminho real do arquivo continua acessível via co_filename.
+# Databricks runs spark_python_task files through exec(compile(...)) in a kernel and
+# does not define __file__. The real file path is still available via co_filename.
 _this_file = inspect.currentframe().f_code.co_filename
 sys.path.append(os.path.join(os.path.dirname(_this_file), "..", "src"))
 
@@ -146,9 +146,9 @@ query = (
 )
 query.awaitTermination()
 
-# Rastreado pelo Spark no driver, confiável independente de isolamento do
-# foreachBatch (ver mesmo padrão em notebooks/ingest_bronze.py). recentProgress
-# vem como dict neste runtime (Databricks Connect), não como objeto com atributos.
+# Tracked by Spark on the driver, so it is reliable regardless of foreachBatch
+# process isolation (same pattern as notebooks/ingest_bronze.py). recentProgress
+# is a dict in this runtime (Databricks Connect), not an object with attributes.
 had_new_data = any(progress["numInputRows"] > 0 for progress in query.recentProgress)
 
 if not had_new_data:
@@ -164,4 +164,4 @@ if not had_new_data:
         schema_drift_records=0,
     )
 
-print(f"Transformação Silver concluída com sucesso para a tabela: {silver_table}")
+print(f"Silver transformation completed successfully for table: {silver_table}")

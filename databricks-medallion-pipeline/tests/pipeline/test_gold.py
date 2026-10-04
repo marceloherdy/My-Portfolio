@@ -58,7 +58,7 @@ def test_aggregate_pipeline_run_health_groups_by_date_pipeline_task(spark):
             "records_read": 10, "records_inserted": 10, "records_rejected": 0, "schema_drift_records": 0,
         },
         {
-            # Mesmo dia/pipeline/task: deve ser agregado na mesma linha.
+            # Same day/pipeline/task: must be aggregated into the same row.
             "pipeline_name": "spotify_events_pipeline", "task_name": "ingest_bronze", "batch_id": -1,
             "started_at": now, "finished_at": now + timedelta(seconds=2), "status": "SUCCESS",
             "records_read": 0, "records_inserted": 0, "records_rejected": 0, "schema_drift_records": 0,
@@ -72,7 +72,7 @@ def test_aggregate_pipeline_run_health_groups_by_date_pipeline_task(spark):
     assert row["runs_count"] == 2
     assert row["success_count"] == 2
     assert row["failed_count"] == 0
-    # Uma das duas execuções tinha batch_id=-1 (execução sem dados novos).
+    # One of the two executions had batch_id=-1 (an execution with no new data).
     assert row["empty_runs_count"] == 1
     assert row["records_read_sum"] == 10
 
@@ -92,8 +92,11 @@ def test_aggregate_pipeline_run_health_counts_failures(spark):
 
 
 def test_aggregate_file_processing_latency_extracts_timestamp_from_filename(spark):
-    # Nome de arquivo real gerado pelo producer (ver src/producer/producer_simulator.py).
-    file_ts = datetime(2026, 9, 16, 8, 52, 30) + timedelta(hours=3)  # -0300 -> UTC
+    # Real file name written by the producer (see src/producer/producer_simulator.py).
+    # Timezone-aware datetime: a naive datetime would be interpreted in the Spark session
+    # timezone and shift the result in environments that do not run in UTC (for example
+    # a cluster in São Paulo).
+    file_ts = datetime(2026, 9, 16, 8, 52, 30, tzinfo=timezone(timedelta(hours=-3)))
     processed_at = file_ts + timedelta(seconds=90)
     df = spark.createDataFrame([{
         "source_file": "/Volumes/x/landing/events_volume/eventos_com_caos_2026-09-16T085230-0300.json",
@@ -124,8 +127,8 @@ def test_aggregate_file_processing_latency_counts_failed_files(spark):
 
 
 def test_aggregate_rejection_reasons_splits_combined_reasons(spark):
-    # rejection_reason é um concat_ws de múltiplos motivos (ver silver.py); cada
-    # motivo deve virar uma linha própria na agregação, não um bucket combinado.
+    # rejection_reason is a concat_ws of several reasons (see silver.py); each reason
+    # must become its own row in the aggregation, not a combined bucket.
     now = _now()
     df = spark.createDataFrame([{
         "rejected_at": now,
@@ -152,7 +155,7 @@ def test_aggregate_timestamp_classifications_counts_per_category(spark):
     assert result == {"ON_TIME": 2, "LATE": 1}
 
 
-# --- Gold de negócio (recalculadas por inteiro a partir da Silver/quarentena) ---
+# --- Business Gold (rebuilt from scratch from Silver/quarantine) ---
 
 BUSINESS_SILVER_SCHEMA = StructType([
     StructField("track_id", StringType()),
@@ -192,7 +195,7 @@ def test_compute_track_popularity_counts_plays_and_unique_users(spark):
 
     assert result["trk_1"]["plays_count"] == 4
     assert result["trk_1"]["total_duration_sec"] == 1000
-    # user_id nulo não conta como usuário distinto.
+    # A null user_id does not count as a distinct user.
     assert result["trk_1"]["unique_users"] == 2
     assert result["trk_2"]["plays_count"] == 1
 
@@ -269,12 +272,12 @@ def test_compute_field_quality_separates_loss_from_degradation(spark):
 
     rows = {(r["field"], r["issue"]): r for r in compute_field_quality(silver, quarantine).collect()}
 
-    # total = 2 na Silver + 2 na quarentena
+    # total = 2 in Silver + 2 in quarantine
     assert rows[("track_id", "INVALID_TRACK_ID")]["impact"] == "LOSS"
     assert rows[("track_id", "INVALID_TRACK_ID")]["total_records"] == 4
     assert rows[("track_id", "INVALID_TRACK_ID")]["pct_of_total"] == 25.0
     assert rows[("platform", "INVALID_PLATFORM")]["records_count"] == 1
-    # NEGATIVE_DURATION é atribuído ao campo duration_played_sec.
+    # NEGATIVE_DURATION is attributed to the duration_played_sec field.
     assert rows[("duration_played_sec", "NEGATIVE_DURATION")]["impact"] == "LOSS"
     assert rows[("user_id", "MISSING_USER_ID")]["impact"] == "DEGRADED"
     assert rows[("device_type", "MISSING_DEVICE_TYPE")]["records_count"] == 1

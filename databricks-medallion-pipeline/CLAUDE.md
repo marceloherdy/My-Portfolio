@@ -4,6 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## O que é este projeto
 
+Os comentários, docstrings e mensagens de log do código estão em inglês; nomes herdados como o prefixo dos arquivos da landing (`eventos_com_caos_*`) e o catálogo `databricks_course_ws_new` foram mantidos de propósito.
+
 Pipeline de engenharia de dados no Azure Databricks (Unity Catalog + Databricks Asset Bundles) que simula uma plataforma de streaming de música. Um producer Python gera arquivos JSON Lines "sujos" de propósito (nulos, chaves ausentes, schema drift, tipos inconsistentes, duplicatas conflitantes, timestamps atrasados/futuros) para exercitar resiliência, rastreabilidade e governança em um Lakehouse com arquitetura Medalhão.
 
 ```text
@@ -13,6 +15,8 @@ Producer Python -> Volume landing -> Bronze (Auto Loader) -> Silver (dedup + qua
 ## Comandos
 
 ```powershell
+# O databricks.yml não guarda host, profile nem ids de cluster/warehouse. Antes de usar o bundle:
+#   $env:DATABRICKS_CONFIG_PROFILE = "<profile>"; $env:BUNDLE_VAR_cluster_id = "<id>"; $env:BUNDLE_VAR_warehouse_id = "<id>"
 # Validar/publicar o bundle
 databricks bundle validate -t dev
 databricks bundle deploy -t dev
@@ -28,7 +32,10 @@ databricks bundle run gold_business -t dev
 databricks bundle run medallion_pipeline -t dev
 
 # Ambiente local (Python 3.12, exigido por compatibilidade com Databricks Connect 16.4)
-py -3.12 -m pip install -e .
+py -3.12 -m venv .venv
+.venv\Scripts\activate
+pip install "databricks-connect~=16.4.0" "pytest~=8.3.0"   # o pip não lê o grupo dev do pyproject.toml
+pip install -e .                                           # só torna src/ importável
 py -3.12 -m py_compile .\src\producer\producer_simulator.py
 
 # Testes (pytest local, sem cluster — ver seção "Testes")
@@ -39,7 +46,7 @@ py -3.12 -m pytest tests/pipeline/test_silver.py::test_normalize_batch_rejection
 
 Não há linter configurado no projeto.
 
-**Testes que usam SparkSession local** (`tests/pipeline/test_silver.py`, `tests/pipeline/test_metrics.py`) exigem uma JVM (JDK) instalada e um `pyspark` capaz de abrir sessão `local[1]`. O `databricks-connect` do `.venv` do projeto bloqueia sessões locais de propósito (só aceita sessões remotas) — nesse ambiente, esses testes são pulados automaticamente (`SKIPPED`) pela fixture `spark` em `tests/conftest.py`, sem falhar a suíte. Para rodá-los de fato, use um ambiente com `pyspark` puro (não `databricks-connect`) e um JDK instalado. `tests/pipeline/test_gold.py` também usa `SparkSession` local. Rodado contra um cluster (fixture `spark` remota, fuso America/Sao_Paulo), `test_aggregate_file_processing_latency_extracts_timestamp_from_filename` falha por 3 h: ele assume sessão em UTC. Os testes de `tests/pipeline/test_audit.py` e `tests/producer/test_producer_simulator.py` não usam Spark e sempre rodam.
+**Testes que usam SparkSession local** (`tests/pipeline/test_silver.py`, `tests/pipeline/test_metrics.py`) exigem uma JVM (JDK) instalada e um `pyspark` capaz de abrir sessão `local[1]`. O `databricks-connect` do `.venv` do projeto bloqueia sessões locais de propósito (só aceita sessões remotas) — nesse ambiente, esses testes são pulados automaticamente (`SKIPPED`) pela fixture `spark` em `tests/conftest.py`, sem falhar a suíte. Para rodá-los de fato, use um ambiente com `pyspark` puro (não `databricks-connect`) e um JDK instalado. `tests/pipeline/test_gold.py` também usa `SparkSession` local. Esses testes também passam rodando contra um cluster (basta uma fixture `spark` remota via `DatabricksSession`); os que usam datetimes são escritos com fuso explícito para não depender do fuso da sessão (UTC local x America/Sao_Paulo no cluster). Os testes de `tests/pipeline/test_audit.py` e `tests/producer/test_producer_simulator.py` não usam Spark e sempre rodam.
 
 ## Arquitetura
 
@@ -60,7 +67,7 @@ Não há linter configurado no projeto.
 - `src/pipeline/`: lógica de transformação **pura e testável** (sem Spark I/O nas funções principais, exceto SparkSession para DataFrames). O critério de estar aqui não é "isso é reusável entre tabelas/pipelines" — é "isso é determinístico (DataFrame in → DataFrame/dict out) e dá pra testar com pytest sem cluster". `silver.py` é específico da tabela `spotify_events` e mesmo assim vive aqui, porque a separação é entre **domínio** (regras de negócio) e **adapter** (I/O, streaming, Delta) — não entre "genérico" e "específico". `metrics.py` e `audit.py` acabam sendo reusados por Bronze e Silver, mas isso é consequência, não o objetivo da pasta.
 - `notebooks/*.py`: orquestração Spark/streaming (o "adapter") — leitura via Auto Loader/`readStream`, `foreachBatch`, `MERGE` Delta, `writeStream`, chamadas de auditoria. Importam a lógica pura de `src/pipeline/` via `sys.path.append` (ver nota abaixo). Um notebook não deve crescer com regras de negócio testáveis embutidas; se uma lógica nova é determinística e vale testar isoladamente, ela nasce em `src/pipeline/`, mesmo que sirva só àquele notebook.
 - `src/producer/producer_simulator.py`: gerador de dados sintéticos, Python puro (sem Spark).
-- `databricks.yml`: define os jobs do bundle (`producer_simulator`, `bronze_ingestion`, `silver_transformation`, `gold_aggregation`, `gold_business` e o orquestrador `medallion_pipeline`, que encadeia todos com `depends_on`) e as variáveis (`cluster_id`, `output_dir`, `num_files`, `min_records`, `max_records`, `interval_sec`).
+- `databricks.yml`: define os jobs do bundle (`producer_simulator`, `bronze_ingestion`, `silver_transformation`, `gold_aggregation`, `gold_business` e o orquestrador `medallion_pipeline`, que encadeia todos com `depends_on`) e as variáveis (`cluster_id`, `output_dir`, `num_files`, `min_records`, `max_records`, `interval_sec`, `days_back`, `warehouse_id`). O bundle também publica o dashboard `dashboards/medallion.lvdash.json` (3 páginas, lê as Gold; precisa de um SQL warehouse). O alvo `dev` **não usa `mode: development`** de propósito: nesse modo o Databricks obriga o prefixo `[dev <usuário>]` em todos os recursos. Se o deploy recusar com "modified remotely" (dashboard salvo pela interface), só use `bundle deploy --force` com a confirmação do usuário.
 
 **Import de `src/pipeline` nos notebooks:** os jobs do bundle apontam `spark_python_task` diretamente para os arquivos em `notebooks/`, sem instalar o pacote no cluster. Por isso os notebooks fazem `sys.path.append` para o diretório `src/` antes de importar `pipeline.*`. Localmente, `pip install -e .` resolve o mesmo import para pytest (reinstalar depois de mover/renomear a pasta do projeto — o `.egg-link`/path fica com o caminho antigo).
 
@@ -111,7 +118,7 @@ Lógica pura em `src/pipeline/gold.py` (`compute_*`). **Diferente das Gold de au
 
 ### Auditoria
 
-Duas tabelas (`src/pipeline/audit.py::PipelineAudit`): `pipeline_audit` (uma linha por lote/execução) e `file_audit` (uma linha por arquivo processado). Status usados: `SUCCESS`/`FAILED`. Documentação completa e queries prontas em [docs/auditoria.md](docs/auditoria.md) — não duplicar aqui, só consultar quando precisar investigar uma execução.
+Duas tabelas (`src/pipeline/audit.py::PipelineAudit`): `pipeline_audit` (uma linha por lote/execução) e `file_audit` (uma linha por arquivo processado). Status usados: `SUCCESS`/`FAILED`. Documentação completa e queries prontas em [docs/auditing.md](docs/auditing.md) — não duplicar aqui, só consultar quando precisar investigar uma execução.
 
 **Nota sobre `query.recentProgress`:** usado em todos os notebooks para detectar "sem dados novos" (em vez de um contador Python global, que não sobrevive ao isolamento de processo do `foreachBatch` neste cluster Unity Catalog). Cada elemento vem como `dict` neste runtime (Databricks Connect), não como objeto `StreamingQueryProgress` com atributos — acesse com `progress["numInputRows"]`, não `progress.numInputRows`.
 

@@ -5,8 +5,8 @@ from pyspark.sql.types import StringType, StructField, StructType, TimestampType
 
 from pipeline.silver import build_quarantine_rows, dedupe_valid_records, normalize_batch
 
-# Schema mínimo esperado por normalize_batch/dedupe_valid_records/build_quarantine_rows,
-# equivalente às colunas que chegam da Bronze (producer + _ingested_at/_source_file/_rescued_data).
+# Minimal schema expected by normalize_batch/dedupe_valid_records/build_quarantine_rows,
+# equivalent to the columns that come from Bronze (producer + _ingested_at/_source_file/_rescued_data).
 SCHEMA = StructType([
     StructField("event_id", StringType()),
     StructField("batch_id", StringType()),
@@ -23,14 +23,14 @@ SCHEMA = StructType([
 
 
 def _ts(offset=timedelta()):
-    # Gera timestamp relativo a "agora" (não um valor fixo), porque normalize_batch
-    # classifica LATE/FUTURE comparando com F.current_timestamp() em tempo de execução.
+    # Builds a timestamp relative to "now" (not a fixed value), because normalize_batch
+    # classifies LATE/FUTURE by comparing with F.current_timestamp() at run time.
     return (datetime.now(timezone.utc) + offset).strftime("%Y-%m-%dT%H:%M:%S+0000")
 
 
 def _row(**overrides):
-    # Registro válido por padrão; cada teste sobrescreve só o campo que quer invalidar,
-    # isolando a regra de negócio testada do resto do registro.
+    # Valid record by default; each test overrides only the field it wants to invalidate,
+    # isolating the business rule under test from the rest of the record.
     row = {
         "event_id": "evt_1",
         "batch_id": "batch_1",
@@ -52,7 +52,7 @@ def _build_df(spark, *rows):
     return spark.createDataFrame([dict(r) for r in rows], SCHEMA)
 
 
-# Um caso por motivo de quarentena descrito no CLAUDE.md (rejection_reason).
+# One case per quarantine reason documented in CLAUDE.md (rejection_reason).
 @pytest.mark.parametrize(
     "overrides, expected_reason",
     [
@@ -76,7 +76,7 @@ def test_normalize_batch_rejection_reason(spark, overrides, expected_reason):
 
 
 def test_normalize_batch_rejection_reason_combined(spark):
-    # rejection_reason é um concat_ws de todos os motivos aplicáveis, não só o primeiro.
+    # rejection_reason is a concat_ws of all applicable reasons, not just the first.
     df = _build_df(spark, _row(event_id="", track_id=""))
     reason = normalize_batch(df).collect()[0]["rejection_reason"]
     assert "INVALID_EVENT_ID" in reason
@@ -103,21 +103,21 @@ def test_normalize_batch_timestamp_classification_on_time(spark):
 
 
 def test_normalize_batch_timestamp_classification_late(spark):
-    # Mesmo cenário do producer (i % 6 == 0 e i != 0): timestamp 2 dias atrás -> LATE.
+    # Same scenario as the producer (i % 13 == 0 and i != 0): timestamp 2 days ago -> LATE.
     df = _build_df(spark, _row(timestamp=_ts(-timedelta(days=2))))
     result = normalize_batch(df).collect()[0]
     assert result["timestamp_classification"] == "LATE"
 
 
 def test_normalize_batch_timestamp_classification_future(spark):
-    # Mesmo cenário do producer (i % 11 == 0): timestamp 1 dia à frente -> FUTURE.
+    # Same scenario as the producer (i % 11 == 0): timestamp 1 day ahead -> FUTURE.
     df = _build_df(spark, _row(timestamp=_ts(timedelta(days=1))))
     result = normalize_batch(df).collect()[0]
     assert result["timestamp_classification"] == "FUTURE"
 
 
 def test_dedupe_valid_records_tie_break_by_ingested_at(spark):
-    # Mesmo event_id em dois arquivos: vence o registro com _ingested_at mais recente.
+    # Same event_id in two files: the record with the latest _ingested_at wins.
     older = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
     newer = datetime.now(timezone.utc).replace(tzinfo=None)
     df = _build_df(
@@ -133,7 +133,7 @@ def test_dedupe_valid_records_tie_break_by_ingested_at(spark):
 
 
 def test_dedupe_valid_records_tie_break_by_source_file(spark):
-    # _ingested_at empatado: desempate por _source_file em ordem decrescente.
+    # Tied _ingested_at: the tie is broken by _source_file in descending order.
     same_time = datetime.now(timezone.utc).replace(tzinfo=None)
     df = _build_df(
         spark,
@@ -148,8 +148,8 @@ def test_dedupe_valid_records_tie_break_by_source_file(spark):
 
 
 def test_build_quarantine_rows_shape(spark):
-    # Confirma que o registro rejeitado carrega rejection_reason e ganha rejected_at,
-    # sem executar o write real na tabela de quarentena.
+    # Confirms that the rejected record carries rejection_reason and gains rejected_at,
+    # without performing the real write to the quarantine table.
     df = _build_df(spark, _row(track_id=""))
     normalized = normalize_batch(df)
     rejected = normalized.filter(normalized.rejection_reason != "")

@@ -1,11 +1,11 @@
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
-# Classificações de timestamp consideradas nas métricas de negócio: FUTURE e INVALID
-# distorcem a série temporal, então ficam de fora.
+# Timestamp classifications included in the business metrics: FUTURE and INVALID
+# would distort the time series, so they are left out.
 BUSINESS_TIMESTAMP_CLASSIFICATIONS = ["ON_TIME", "LATE"]
 
-# Campo afetado por cada motivo de rejeição da quarentena (ver silver.py::normalize_batch).
+# Field affected by each quarantine rejection reason (see silver.py::normalize_batch).
 REJECTION_REASON_TO_FIELD = {
     "INVALID_EVENT_ID": "event_id",
     "INVALID_TRACK_ID": "track_id",
@@ -15,13 +15,13 @@ REJECTION_REASON_TO_FIELD = {
     "INVALID_TIMESTAMP": "timestamp",
 }
 
-# Nome de arquivo gerado pelo producer: eventos_com_caos_2026-09-16T085230-0300.json
+# File name written by the producer: eventos_com_caos_2026-09-16T085230-0300.json
 FILENAME_TIMESTAMP_PATTERN = r"eventos_com_caos_(\d{4}-\d{2}-\d{2}T\d{6}[+-]\d{4})\.json"
 FILENAME_TIMESTAMP_FORMAT = "yyyy-MM-dd'T'HHmmssZ"
 
 
 def aggregate_pipeline_run_health(pipeline_audit_batch_df):
-    """Agrega pipeline_audit por dia/pipeline/task para o dashboard de saúde do pipeline."""
+    """Aggregate pipeline_audit by day/pipeline/task for the pipeline health dashboard."""
     return (
         pipeline_audit_batch_df
         .withColumn("execution_date", F.to_date("started_at"))
@@ -45,8 +45,8 @@ def aggregate_pipeline_run_health(pipeline_audit_batch_df):
 
 
 def aggregate_file_processing_latency(file_audit_batch_df):
-    """Agrega file_audit por dia/tabela de destino, medindo o atraso entre a geração do
-    arquivo (timestamp no nome, gerado pelo producer) e o processamento (processed_at)."""
+    """Aggregate file_audit by day/target table, measuring the delay between file generation
+    (the timestamp in the file name, written by the producer) and processing (processed_at)."""
     extracted = (
         file_audit_batch_df
         .withColumn(
@@ -73,8 +73,8 @@ def aggregate_file_processing_latency(file_audit_batch_df):
 
 
 def aggregate_rejection_reasons(quarantine_batch_df):
-    """Agrega a quarentena por dia/motivo de rejeição (um registro pode ter múltiplos
-    motivos concatenados em rejection_reason; cada motivo vira uma linha própria)."""
+    """Aggregate the quarantine by day/rejection reason (a record can have several reasons
+    concatenated in rejection_reason; each reason becomes its own row)."""
     return (
         quarantine_batch_df
         .withColumn("event_date", F.to_date("rejected_at"))
@@ -88,7 +88,7 @@ def aggregate_rejection_reasons(quarantine_batch_df):
 
 
 def aggregate_timestamp_classifications(silver_batch_df):
-    """Agrega a Silver por dia/classificação de timestamp (ON_TIME/LATE/FUTURE/INVALID)."""
+    """Aggregate Silver by day/timestamp classification (ON_TIME/LATE/FUTURE/INVALID)."""
     return (
         silver_batch_df
         .withColumn("event_date", F.to_date("_ingested_at"))
@@ -101,7 +101,7 @@ def aggregate_timestamp_classifications(silver_batch_df):
 
 
 def _business_events(silver_df):
-    """Eventos da Silver aptos às métricas de negócio, com a data do evento (event_date)."""
+    """Silver events eligible for the business metrics, with the event date (event_date)."""
     return (
         silver_df
         .filter(F.col("timestamp_classification").isin(BUSINESS_TIMESTAMP_CLASSIFICATIONS))
@@ -110,7 +110,7 @@ def _business_events(silver_df):
 
 
 def compute_track_popularity(silver_df):
-    """Plays, duração e usuários distintos por dia/faixa."""
+    """Plays, duration and distinct users per day/track."""
     return (
         _business_events(silver_df)
         .groupBy("event_date", "track_id")
@@ -124,8 +124,8 @@ def compute_track_popularity(silver_df):
 
 
 def compute_device_usage(silver_df):
-    """Plays e duração por dia/dispositivo. device_type nulo vira 'unknown' (o campo só existe
-    nos registros com schema drift) e share_pct é a participação no total de plays do dia."""
+    """Plays and duration per day/device. A null device_type becomes 'unknown' (the field only
+    exists on records with schema drift) and share_pct is the share of the day's total plays."""
     per_day = Window.partitionBy("event_date")
     return (
         _business_events(silver_df)
@@ -141,7 +141,7 @@ def compute_device_usage(silver_df):
 
 
 def compute_user_activity(silver_df):
-    """Atividade por dia/usuário identificado (eventos sem user_id ficam de fora)."""
+    """Activity per day/identified user (events without user_id are excluded)."""
     return (
         _business_events(silver_df)
         .filter(F.col("user_id").isNotNull())
@@ -155,7 +155,7 @@ def compute_user_activity(silver_df):
 
 
 def compute_business_kpi(silver_df):
-    """KPIs diários, incluindo a cobertura de user_id e device_type."""
+    """Daily KPIs, including the coverage of user_id and device_type."""
     return (
         _business_events(silver_df)
         .groupBy("event_date")
@@ -183,14 +183,14 @@ def _missing_field_counts(silver_df, field, issue):
 
 
 def compute_field_quality(silver_df, quarantine_df):
-    """Qual campo mais prejudica os dados, por dia de ingestão.
+    """Which fields hurt the data the most, per ingestion day.
 
-    - ``LOSS``: motivos de rejeição da quarentena mapeados para o campo (o registro foi perdido).
-    - ``DEGRADED``: campos nulos em registros que permanecem na Silver (user_id, device_type).
+    - ``LOSS``: quarantine rejection reasons mapped to the field (the record was lost).
+    - ``DEGRADED``: null fields on records that stay in Silver (user_id, device_type).
 
-    ``total_records`` = Silver + quarentena do dia (registros que chegaram à Silver; duplicatas
-    já removidas). Um registro pode ter mais de um problema, então os percentuais por campo
-    não somam 100%.
+    ``total_records`` is Silver + quarantine for the day (records that reached Silver, with
+    duplicates already removed). A record can have more than one problem, so the per-field
+    percentages do not add up to 100%.
     """
     silver = silver_df.withColumn("event_date", F.to_date("_ingested_at"))
     quarantine = quarantine_df.withColumn("event_date", F.to_date("_ingested_at"))

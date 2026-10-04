@@ -3,9 +3,9 @@ from uuid import UUID
 
 from pipeline.audit import build_audit_record, build_file_audit_records
 
-# Testes sem SparkSession: build_audit_record/build_file_audit_records só montam
-# dicts (a parte pura, extraída de PipelineAudit.write_batch/write_files), sem
-# tocar em Delta.
+# Tests without a SparkSession: build_audit_record/build_file_audit_records only build
+# dicts (the pure part, extracted from PipelineAudit.write_batch/write_files) and
+# never touch Delta.
 
 
 def test_build_audit_record_defaults():
@@ -76,9 +76,9 @@ def test_build_file_audit_records():
         assert UUID(record["file_audit_id"])
         assert record["run_id"] == "run_1"
 
-    # sem records_inserted explícito, e status SUCCESS, assume records_read
+    # without an explicit records_inserted and with status SUCCESS, it assumes records_read
     assert records[0]["records_inserted"] == 5
-    # com records_inserted explícito, usa o valor informado
+    # with an explicit records_inserted, it uses the given value
     assert records[1]["records_inserted"] == 2
 
 
@@ -97,8 +97,8 @@ def test_build_file_audit_records_failure_defaults_to_zero_inserted():
 
 
 def test_build_file_audit_records_empty_input():
-    # PipelineAudit.write_files só chama spark.createDataFrame(...) se a lista não
-    # for vazia; aqui garantimos que a função pura já devolve [] sem erro.
+    # PipelineAudit.write_files only calls spark.createDataFrame(...) when the list is
+    # not empty; here we make sure the pure function already returns [] without error.
     assert build_file_audit_records(
         file_metrics=[],
         run_id="run_1",

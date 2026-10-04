@@ -55,7 +55,7 @@ def build_file_audit_records(file_metrics, run_id, batch_id, target_table, statu
 
 
 class PipelineAudit:
-    """Persiste métricas de execução e de arquivos em tabelas Delta."""
+    """Persist execution and file metrics to Delta tables."""
 
     pipeline_schema = StructType([
         StructField("audit_id", StringType(), False),

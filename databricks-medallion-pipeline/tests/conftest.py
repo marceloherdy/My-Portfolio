@@ -4,13 +4,13 @@ from pyspark.sql import SparkSession
 
 @pytest.fixture(scope="session")
 def spark():
-    """SparkSession local para os testes de src/pipeline/.
+    """Local SparkSession for the src/pipeline/ tests.
 
-    Requer uma JVM (JDK) instalada e um pyspark capaz de subir uma sessão
-    local (o `databricks-connect` do .venv do projeto bloqueia sessões
-    locais de propósito — use um ambiente com `pyspark` puro para rodar
-    estes testes). Sem isso, os testes que dependem desta fixture são
-    pulados automaticamente em vez de falhar.
+    Requires an installed JVM (JDK) and a pyspark able to start a local
+    session (the project's .venv `databricks-connect` blocks local sessions
+    on purpose; use an environment with plain `pyspark` to run these tests).
+    Without that, the tests that depend on this fixture are skipped
+    automatically instead of failing.
     """
     try:
         session = (
@@ -21,7 +21,7 @@ def spark():
             .getOrCreate()
         )
     except Exception as exc:
-        pytest.skip(f"SparkSession local indisponível neste ambiente (JDK ausente ou databricks-connect ativo): {exc}")
+        pytest.skip(f"Local SparkSession unavailable in this environment (missing JDK or databricks-connect active): {exc}")
         return
     yield session
     session.stop()

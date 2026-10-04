@@ -3,14 +3,15 @@ bundle:
 
 targets:
   dev:
-    mode: development
     default: true
     workspace:
+      # No host or profile here. Select a profile with the DATABRICKS_CONFIG_PROFILE
+      # environment variable (or the -p flag); its host is the workspace that is used.
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
 
 variables:
   cluster_id:
-    description: Existing cluster used by the project jobs
+    description: Existing cluster used by the project jobs (set BUNDLE_VAR_cluster_id or pass --var)
     default: "<your-cluster-id>"
   output_dir:
     description: Persistent destination for generated JSON Lines files
@@ -27,8 +28,20 @@ variables:
   interval_sec:
     description: Pause in seconds between generated files (must be >= 1)
     default: "2"
+  days_back:
+    description: Spread event timestamps over the last N days (0 = only now; use 7 to backfill history)
+    default: "0"
+  warehouse_id:
+    description: SQL warehouse that runs the dashboard queries (set BUNDLE_VAR_warehouse_id or pass --var)
+    default: "<your-warehouse-id>"
 
 resources:
+  dashboards:
+    medallion_dashboard:
+      display_name: Medallion pipeline
+      file_path: ./dashboards/medallion.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+
   jobs:
     medallion_pipeline:
       name: ${bundle.name}-${bundle.target}-pipeline
@@ -49,6 +62,8 @@ resources:
               - ${var.max_records}
               - --interval-sec
               - ${var.interval_sec}
+              - --days-back
+              - ${var.days_back}
         - task_key: ingest_bronze
           depends_on:
             - task_key: generate_landing_events
@@ -104,6 +119,8 @@ resources:
               - ${var.max_records}
               - --interval-sec
               - ${var.interval_sec}
+              - --days-back
+              - ${var.days_back}
 
     bronze_ingestion:
       name: ${bundle.name}-${bundle.target}-bronze

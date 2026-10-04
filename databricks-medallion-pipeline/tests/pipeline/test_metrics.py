@@ -11,8 +11,8 @@ SCHEMA = StructType([
 
 
 def test_compute_file_metrics_basic(spark):
-    # Uso da Bronze: sem extra_aggs, agrupa por _source_file e conta schema drift
-    # (_rescued_data não nulo) por arquivo.
+    # Bronze usage: without extra_aggs, groups by _source_file and counts schema drift
+    # (non-null _rescued_data) per file.
     df = spark.createDataFrame(
         [
             {"_source_file": "file_a.json", "_rescued_data": None, "rejection_reason": ""},
@@ -29,8 +29,8 @@ def test_compute_file_metrics_basic(spark):
 
 
 def test_compute_file_metrics_with_extra_aggs(spark):
-    # Uso da Silver: extra_aggs adiciona records_inserted (registros não rejeitados)
-    # à agregação padrão, sem duplicar a lógica de groupBy em silver_transform.py.
+    # Silver usage: extra_aggs adds records_inserted (non-rejected records) to the
+    # default aggregation, without duplicating the groupBy logic in silver_transform.py.
     df = spark.createDataFrame(
         [
             {"_source_file": "file_a.json", "_rescued_data": None, "rejection_reason": ""},

@@ -3,8 +3,8 @@ import os
 import sys
 from traceback import format_exc
 
-# Databricks executa spark_python_task via exec(compile(...)) num kernel, sem
-# definir __file__. O caminho real do arquivo continua acessível via co_filename.
+# Databricks runs spark_python_task files through exec(compile(...)) in a kernel and
+# does not define __file__. The real file path is still available via co_filename.
 _this_file = inspect.currentframe().f_code.co_filename
 sys.path.append(os.path.join(os.path.dirname(_this_file), "..", "src"))
 
@@ -25,10 +25,10 @@ quarantine_table = f"{catalog}.silver.spotify_events_quarantine"
 audit_table = f"{catalog}.ops.pipeline_audit"
 file_audit_table = f"{catalog}.ops.file_audit"
 
-# Diferente das Gold de auditoria (incrementais e aditivas), estas tabelas são
-# recalculadas por inteiro a cada execução: a Silver sofre MERGE com UPDATE (um
-# readStream falharia) e métricas como unique_users/distinct_tracks não são
-# somáveis entre execuções. O volume é pequeno e o overwrite Delta é atômico.
+# Unlike the audit Gold tables (incremental and additive), these tables are fully
+# rebuilt on every run: Silver is updated through MERGE ... UPDATE (a readStream
+# would fail) and metrics such as unique_users/distinct_tracks cannot be summed
+# across runs. The volume is small and a Delta overwrite is atomic.
 gold_tables = {
     "track_popularity_daily": lambda silver, quarantine: compute_track_popularity(silver),
     "device_usage_daily": lambda silver, quarantine: compute_device_usage(silver),
@@ -39,7 +39,7 @@ gold_tables = {
 
 
 def rebuild_table(name, compute_fn):
-    """Recalcula uma tabela Gold por inteiro a partir da Silver/quarentena, com auditoria própria."""
+    """Rebuild a Gold table from scratch from Silver/quarantine, with its own audit."""
     target_table = f"{catalog}.gold.{name}"
     audit = PipelineAudit(
         spark=spark,
@@ -89,4 +89,4 @@ def rebuild_table(name, compute_fn):
 for table_name, compute in gold_tables.items():
     rebuild_table(table_name, compute)
 
-print(f"Agregação Gold (métricas de negócio) concluída com sucesso: {', '.join(gold_tables)}")
+print(f"Gold business metrics completed successfully: {', '.join(gold_tables)}")

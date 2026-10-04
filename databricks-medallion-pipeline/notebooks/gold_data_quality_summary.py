@@ -3,8 +3,8 @@ import os
 import sys
 from traceback import format_exc
 
-# Databricks executa spark_python_task via exec(compile(...)) num kernel, sem
-# definir __file__. O caminho real do arquivo continua acessível via co_filename.
+# Databricks runs spark_python_task files through exec(compile(...)) in a kernel and
+# does not define __file__. The real file path is still available via co_filename.
 _this_file = inspect.currentframe().f_code.co_filename
 sys.path.append(os.path.join(os.path.dirname(_this_file), "..", "src"))
 
@@ -30,7 +30,7 @@ spark.sql(f"CREATE TABLE IF NOT EXISTS {gold_table} ({gold_schema}) USING DELTA"
 
 
 def merge_delta(delta_df):
-    """Faz upsert aditivo (soma records_count) na Gold, chave (event_date, metric_type, category)."""
+    """Additive upsert (sums records_count) into Gold, keyed by (event_date, metric_type, category)."""
     target = DeltaTable.forName(spark, gold_table)
     (
         target.alias("target")
@@ -47,7 +47,7 @@ def merge_delta(delta_df):
 
 
 def run_stream(task_name, source_table, aggregate_fn, checkpoint_path):
-    """Roda uma stream incremental de uma fonte para a Gold, com auditoria própria."""
+    """Run an incremental stream from a source table into Gold, with its own audit."""
     audit = PipelineAudit(
         spark=spark,
         pipeline_name="spotify_events_pipeline",
@@ -104,9 +104,9 @@ def run_stream(task_name, source_table, aggregate_fn, checkpoint_path):
     )
     query.awaitTermination()
 
-    # Rastreado pelo Spark no driver, confiável independente de isolamento do
-    # foreachBatch (ver mesmo padrão em notebooks/ingest_bronze.py). recentProgress
-    # vem como dict neste runtime (Databricks Connect), não como objeto com atributos.
+    # Tracked by Spark on the driver, so it is reliable regardless of foreachBatch
+    # process isolation (same pattern as notebooks/ingest_bronze.py). recentProgress
+    # is a dict in this runtime (Databricks Connect), not an object with attributes.
     had_new_data = any(progress["numInputRows"] > 0 for progress in query.recentProgress)
 
     if not had_new_data:
@@ -137,4 +137,4 @@ run_stream(
     checkpoint_path="/Volumes/databricks_course_ws_new/ops/checkpoints_volume/gold_quality_timestamp_classification",
 )
 
-print(f"Agregação Gold (qualidade de dados) concluída com sucesso para a tabela: {gold_table}")
+print(f"Gold aggregation (data quality) completed successfully for table: {gold_table}")
