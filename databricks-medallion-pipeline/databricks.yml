@@ -1,0 +1,163 @@
+bundle:
+  name: databricks-medallion-pipeline
+
+targets:
+  dev:
+    default: true
+    workspace:
+      # No host or profile here. Select a profile with the DATABRICKS_CONFIG_PROFILE
+      # environment variable (or the -p flag); its host is the workspace that is used.
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+
+variables:
+  cluster_id:
+    description: Existing cluster used by the project jobs (set BUNDLE_VAR_cluster_id or pass --var)
+    default: "<your-cluster-id>"
+  output_dir:
+    description: Persistent destination for generated JSON Lines files
+    default: /Volumes/databricks_course_ws_new/landing/events_volume
+  num_files:
+    description: Number of JSON files generated in each producer run
+    default: "10"
+  min_records:
+    description: Minimum records per generated file
+    default: "50"
+  max_records:
+    description: Maximum records per generated file
+    default: "150"
+  interval_sec:
+    description: Pause in seconds between generated files (must be >= 1)
+    default: "2"
+  days_back:
+    description: Spread event timestamps over the last N days (0 = only now; use 7 to backfill history)
+    default: "0"
+  warehouse_id:
+    description: SQL warehouse that runs the dashboard queries (set BUNDLE_VAR_warehouse_id or pass --var)
+    default: "<your-warehouse-id>"
+
+resources:
+  dashboards:
+    medallion_dashboard:
+      display_name: Medallion pipeline
+      file_path: ./dashboards/medallion.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+
+  jobs:
+    medallion_pipeline:
+      name: ${bundle.name}-${bundle.target}-pipeline
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: generate_landing_events
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: src/producer/producer_simulator.py
+            parameters:
+              - --output-dir
+              - ${var.output_dir}
+              - --num-files
+              - ${var.num_files}
+              - --min-records
+              - ${var.min_records}
+              - --max-records
+              - ${var.max_records}
+              - --interval-sec
+              - ${var.interval_sec}
+              - --days-back
+              - ${var.days_back}
+        - task_key: ingest_bronze
+          depends_on:
+            - task_key: generate_landing_events
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: notebooks/ingest_bronze.py
+        - task_key: transform_silver
+          depends_on:
+            - task_key: ingest_bronze
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: notebooks/silver_transform.py
+        - task_key: pipeline_run_health
+          depends_on:
+            - task_key: transform_silver
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: notebooks/gold_pipeline_run_health.py
+        - task_key: file_processing_latency
+          depends_on:
+            - task_key: transform_silver
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: notebooks/gold_file_processing_latency.py
+        - task_key: data_quality_summary
+          depends_on:
+            - task_key: transform_silver
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: notebooks/gold_data_quality_summary.py
+        - task_key: business_metrics
+          depends_on:
+            - task_key: transform_silver
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: notebooks/gold_business_metrics.py
+
+    producer_simulator:
+      name: ${bundle.name}-${bundle.target}-producer
+      tasks:
+        - task_key: generate_landing_events
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: src/producer/producer_simulator.py
+            parameters:
+              - --output-dir
+              - ${var.output_dir}
+              - --num-files
+              - ${var.num_files}
+              - --min-records
+              - ${var.min_records}
+              - --max-records
+              - ${var.max_records}
+              - --interval-sec
+              - ${var.interval_sec}
+              - --days-back
+              - ${var.days_back}
+
+    bronze_ingestion:
+      name: ${bundle.name}-${bundle.target}-bronze
+      tasks:
+        - task_key: ingest_bronze
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: notebooks/ingest_bronze.py
+
+    silver_transformation:
+      name: ${bundle.name}-${bundle.target}-silver
+      tasks:
+        - task_key: transform_silver
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: notebooks/silver_transform.py
+
+    gold_aggregation:
+      name: ${bundle.name}-${bundle.target}-gold
+      tasks:
+        - task_key: pipeline_run_health
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: notebooks/gold_pipeline_run_health.py
+        - task_key: file_processing_latency
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: notebooks/gold_file_processing_latency.py
+        - task_key: data_quality_summary
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: notebooks/gold_data_quality_summary.py
+
+    gold_business:
+      name: ${bundle.name}-${bundle.target}-gold-business
+      tasks:
+        - task_key: business_metrics
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: notebooks/gold_business_metrics.py

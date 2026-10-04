@@ -1,0 +1,1122 @@
+{
+  "datasets": [
+    {
+      "name": "f92d85f5",
+      "displayName": "Pipeline run KPIs",
+      "queryLines": [
+        "SELECT sum(runs_count) AS total_runs,\n",
+        "       sum(failed_count) AS failed_runs,\n",
+        "       sum(empty_runs_count) AS empty_runs\n",
+        "FROM databricks_course_ws_new.gold.pipeline_run_health\n"
+      ]
+    },
+    {
+      "name": "6bfbbd10",
+      "displayName": "Average duration by task",
+      "queryLines": [
+        "SELECT regexp_replace(regexp_replace(task_name, '^gold_', ''), '_daily$', '') AS task_name,\n",
+        "       round(sum(avg_duration_sec * runs_count) / sum(runs_count), 1) AS avg_duration_sec\n",
+        "FROM databricks_course_ws_new.gold.pipeline_run_health\n",
+        "GROUP BY task_name\n",
+        "ORDER BY avg_duration_sec DESC\n"
+      ]
+    },
+    {
+      "name": "8789da15",
+      "displayName": "File processing latency",
+      "queryLines": [
+        "SELECT CAST(processed_date AS STRING) AS processed_date,\n",
+        "       replace(target_table, 'databricks_course_ws_new.', '') AS target_table, files_count,\n",
+        "       round(avg_latency_sec, 1) AS avg_latency_sec,\n",
+        "       max_latency_sec, failed_files_count\n",
+        "FROM databricks_course_ws_new.gold.file_processing_latency\n",
+        "ORDER BY processed_date DESC, target_table\n"
+      ]
+    },
+    {
+      "name": "fec038e0",
+      "displayName": "Quarantine KPIs",
+      "queryLines": [
+        "WITH q AS (SELECT count(*) AS n FROM databricks_course_ws_new.silver.spotify_events_quarantine),\n",
+        "     s AS (SELECT count(*) AS n FROM databricks_course_ws_new.silver.spotify_events)\n",
+        "SELECT q.n AS quarantined_records,\n",
+        "       s.n AS accepted_records,\n",
+        "       round(100 * q.n / (q.n + s.n), 1) AS quarantine_pct\n",
+        "FROM q CROSS JOIN s\n"
+      ]
+    },
+    {
+      "name": "a3ae7af3",
+      "displayName": "Loss and degradation by field",
+      "queryLines": [
+        "SELECT issue, impact, sum(records_count) AS records_count\n",
+        "FROM databricks_course_ws_new.gold.field_quality\n",
+        "GROUP BY issue, impact\n",
+        "ORDER BY records_count DESC\n"
+      ]
+    },
+    {
+      "name": "cd27de5d",
+      "displayName": "Quarantine rejection reasons",
+      "queryLines": [
+        "SELECT category AS rejection_reason, sum(records_count) AS records_count\n",
+        "FROM databricks_course_ws_new.gold.data_quality_summary\n",
+        "WHERE metric_type = 'REJECTION_REASON'\n",
+        "GROUP BY category\n",
+        "ORDER BY records_count DESC\n"
+      ]
+    },
+    {
+      "name": "cdc3f1b7",
+      "displayName": "Timestamp classification",
+      "queryLines": [
+        "SELECT category AS timestamp_classification, sum(records_count) AS records_count\n",
+        "FROM databricks_course_ws_new.gold.data_quality_summary\n",
+        "WHERE metric_type = 'TIMESTAMP_CLASSIFICATION'\n",
+        "GROUP BY category\n"
+      ]
+    },
+    {
+      "name": "24ce3446",
+      "displayName": "Business KPI totals",
+      "queryLines": [
+        "SELECT sum(plays_count) AS total_plays,\n",
+        "       max(active_users) AS peak_daily_active_users,\n",
+        "       round(sum(total_duration_sec) / 3600, 1) AS hours_listened\n",
+        "FROM databricks_course_ws_new.gold.business_kpi_daily\n"
+      ]
+    },
+    {
+      "name": "d9f1456f",
+      "displayName": "Plays by day",
+      "queryLines": [
+        "SELECT event_date, plays_count\n",
+        "FROM databricks_course_ws_new.gold.business_kpi_daily\n"
+      ]
+    },
+    {
+      "name": "68cdc9b6",
+      "displayName": "Top 10 tracks",
+      "queryLines": [
+        "SELECT track_id, sum(plays_count) AS plays_count\n",
+        "FROM databricks_course_ws_new.gold.track_popularity_daily\n",
+        "GROUP BY track_id\n",
+        "ORDER BY plays_count DESC\n",
+        "LIMIT 10\n"
+      ]
+    },
+    {
+      "name": "2ddb6411",
+      "displayName": "Plays by device",
+      "queryLines": [
+        "SELECT device_type, sum(plays_count) AS plays_count\n",
+        "FROM databricks_course_ws_new.gold.device_usage_daily\n",
+        "GROUP BY device_type\n"
+      ]
+    },
+    {
+      "name": "dac4d10c",
+      "displayName": "Top 10 users",
+      "queryLines": [
+        "SELECT user_id,\n",
+        "       sum(plays_count) AS plays_count,\n",
+        "       round(sum(total_duration_sec) / 3600, 1) AS hours_listened\n",
+        "FROM databricks_course_ws_new.gold.user_activity_daily\n",
+        "GROUP BY user_id\n",
+        "ORDER BY plays_count DESC\n",
+        "LIMIT 10\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "1854d02a",
+      "displayName": "Pipeline observability",
+      "layout": [
+        {
+          "widget": {
+            "name": "7a9badb2",
+            "multilineTextboxSpec": {
+              "lines": [
+                "Runs, failures and processing latency, from the audit Gold tables (`pipeline_run_health`, `file_processing_latency`)."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "1824ee4c",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "f92d85f5",
+                  "fields": [
+                    {
+                      "name": "total_runs",
+                      "expression": "`total_runs`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "total_runs",
+                  "displayName": "Total task runs"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Total task runs"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "31ae4d0e",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "f92d85f5",
+                  "fields": [
+                    {
+                      "name": "failed_runs",
+                      "expression": "`failed_runs`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "failed_runs",
+                  "displayName": "Failed runs"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Failed runs"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 1,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "9c40c4ed",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "f92d85f5",
+                  "fields": [
+                    {
+                      "name": "empty_runs",
+                      "expression": "`empty_runs`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "empty_runs",
+                  "displayName": "Runs with no new data"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Runs with no new data"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 1,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "1432f6b4",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "6bfbbd10",
+                  "fields": [
+                    {
+                      "name": "task_name",
+                      "expression": "`task_name`"
+                    },
+                    {
+                      "name": "avg_duration_sec",
+                      "expression": "`avg_duration_sec`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "task_name",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "task_name"
+                },
+                "y": {
+                  "fieldName": "avg_duration_sec",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "avg_duration_sec"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Average duration by task (s)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 3,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "305be9e9",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "8789da15",
+                  "fields": [
+                    {
+                      "name": "processed_date",
+                      "expression": "`processed_date`"
+                    },
+                    {
+                      "name": "target_table",
+                      "expression": "`target_table`"
+                    },
+                    {
+                      "name": "files_count",
+                      "expression": "`files_count`"
+                    },
+                    {
+                      "name": "avg_latency_sec",
+                      "expression": "`avg_latency_sec`"
+                    },
+                    {
+                      "name": "max_latency_sec",
+                      "expression": "`max_latency_sec`"
+                    },
+                    {
+                      "name": "failed_files_count",
+                      "expression": "`failed_files_count`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "processed_date",
+                    "displayName": "processed_date"
+                  },
+                  {
+                    "fieldName": "target_table",
+                    "displayName": "target_table"
+                  },
+                  {
+                    "fieldName": "files_count",
+                    "displayName": "files_count"
+                  },
+                  {
+                    "fieldName": "avg_latency_sec",
+                    "displayName": "avg_latency_sec"
+                  },
+                  {
+                    "fieldName": "max_latency_sec",
+                    "displayName": "max_latency_sec"
+                  },
+                  {
+                    "fieldName": "failed_files_count",
+                    "displayName": "failed_files_count"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "File processing latency"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 3,
+            "width": 3,
+            "height": 8
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    },
+    {
+      "name": "2ab54ec9",
+      "displayName": "Data quality",
+      "layout": [
+        {
+          "widget": {
+            "name": "16121c8f",
+            "multilineTextboxSpec": {
+              "lines": [
+                "Records lost to quarantine (`LOSS`) versus kept with a null field (`DEGRADED`). A record can have more than one problem, so the bars do not add up to the total."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "45b2c23a",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "fec038e0",
+                  "fields": [
+                    {
+                      "name": "quarantined_records",
+                      "expression": "`quarantined_records`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "quarantined_records",
+                  "displayName": "Quarantined records"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Quarantined records"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "4ec06f3c",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "fec038e0",
+                  "fields": [
+                    {
+                      "name": "accepted_records",
+                      "expression": "`accepted_records`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "accepted_records",
+                  "displayName": "Accepted in Silver"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Accepted in Silver"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 1,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "7c9cb324",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "fec038e0",
+                  "fields": [
+                    {
+                      "name": "quarantine_pct",
+                      "expression": "`quarantine_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "quarantine_pct",
+                  "displayName": "Quarantine rate (%)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Quarantine rate (%)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 1,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "f9a6dacb",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "a3ae7af3",
+                  "fields": [
+                    {
+                      "name": "issue",
+                      "expression": "`issue`"
+                    },
+                    {
+                      "name": "records_count",
+                      "expression": "`records_count`"
+                    },
+                    {
+                      "name": "impact",
+                      "expression": "`impact`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "issue",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "issue"
+                },
+                "y": {
+                  "fieldName": "records_count",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "records_count"
+                },
+                "color": {
+                  "fieldName": "impact",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "impact"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Records affected by issue"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 4,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "f6d9b01a",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "cd27de5d",
+                  "fields": [
+                    {
+                      "name": "rejection_reason",
+                      "expression": "`rejection_reason`"
+                    },
+                    {
+                      "name": "records_count",
+                      "expression": "`records_count`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "rejection_reason",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "rejection_reason"
+                },
+                "y": {
+                  "fieldName": "records_count",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "records_count"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Quarantine rejection reasons"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 7,
+            "width": 4,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "200a13be",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "cdc3f1b7",
+                  "fields": [
+                    {
+                      "name": "timestamp_classification",
+                      "expression": "`timestamp_classification`"
+                    },
+                    {
+                      "name": "records_count",
+                      "expression": "`records_count`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pie",
+              "encodings": {
+                "angle": {
+                  "fieldName": "records_count",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "records_count"
+                },
+                "color": {
+                  "fieldName": "timestamp_classification",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "timestamp_classification"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Timestamp classification"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 3,
+            "width": 2,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "a0a8cd2f",
+            "multilineTextboxSpec": {
+              "lines": [
+                "### How to read this page\n",
+                "- `LOSS`: the record failed a business rule and went to quarantine.\n",
+                "- `DEGRADED`: the record stayed in Silver with a null `user_id` or `device_type`.\n",
+                "- `FUTURE` events are kept in Silver but left out of the business metrics."
+              ]
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 7,
+            "width": 2,
+            "height": 4
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    },
+    {
+      "name": "bb90b986",
+      "displayName": "Business metrics",
+      "layout": [
+        {
+          "widget": {
+            "name": "84139f55",
+            "multilineTextboxSpec": {
+              "lines": [
+                "Listening activity from the business Gold tables. Only `ON_TIME` and `LATE` events are counted."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "1abd300b",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "24ce3446",
+                  "fields": [
+                    {
+                      "name": "total_plays",
+                      "expression": "`total_plays`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "total_plays",
+                  "displayName": "Total plays"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Total plays"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "8cf4fe7d",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "24ce3446",
+                  "fields": [
+                    {
+                      "name": "peak_daily_active_users",
+                      "expression": "`peak_daily_active_users`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "peak_daily_active_users",
+                  "displayName": "Peak daily active users"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Peak daily active users"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 1,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "244ab513",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "24ce3446",
+                  "fields": [
+                    {
+                      "name": "hours_listened",
+                      "expression": "`hours_listened`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "hours_listened",
+                  "displayName": "Hours listened"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Hours listened"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 1,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "0b641cb2",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d9f1456f",
+                  "fields": [
+                    {
+                      "name": "daily(event_date)",
+                      "expression": "DATE_TRUNC(\"DAY\", `event_date`)"
+                    },
+                    {
+                      "name": "sum(plays_count)",
+                      "expression": "SUM(`plays_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "daily(event_date)",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "event_date"
+                },
+                "y": {
+                  "fieldName": "sum(plays_count)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "plays_count"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Plays per day"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 4,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "9c1965ac",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "2ddb6411",
+                  "fields": [
+                    {
+                      "name": "device_type",
+                      "expression": "`device_type`"
+                    },
+                    {
+                      "name": "plays_count",
+                      "expression": "`plays_count`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pie",
+              "encodings": {
+                "angle": {
+                  "fieldName": "plays_count",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "plays_count"
+                },
+                "color": {
+                  "fieldName": "device_type",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "device_type"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Plays by device (unknown = field absent)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 3,
+            "width": 2,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "29ffe26d",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "68cdc9b6",
+                  "fields": [
+                    {
+                      "name": "track_id",
+                      "expression": "`track_id`"
+                    },
+                    {
+                      "name": "plays_count",
+                      "expression": "`plays_count`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "track_id",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "track_id"
+                },
+                "y": {
+                  "fieldName": "plays_count",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "plays_count"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Top 10 tracks"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 7,
+            "width": 3,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "406e7bda",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "dac4d10c",
+                  "fields": [
+                    {
+                      "name": "user_id",
+                      "expression": "`user_id`"
+                    },
+                    {
+                      "name": "plays_count",
+                      "expression": "`plays_count`"
+                    },
+                    {
+                      "name": "hours_listened",
+                      "expression": "`hours_listened`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "user_id",
+                    "displayName": "user_id"
+                  },
+                  {
+                    "fieldName": "plays_count",
+                    "displayName": "plays_count"
+                  },
+                  {
+                    "fieldName": "hours_listened",
+                    "displayName": "hours_listened"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Top 10 users"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 7,
+            "width": 3,
+            "height": 4
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.secrets.*
+*.secret
+*.token
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+
+# Databricks local state and generated bundle files
+.databricks/
+**/.databricks/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Packaging/build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Local editor and machine-specific settings
+.vscode/
+.idea/
+
+# Local configuration overrides
+conf/*.local.yml
+conf/*.local.yaml
+conf/*secret*.yml
+conf/*secret*.yaml
+
+# Generated landing data
+# Keep source fixtures in tests/ or commit an explicit sample file separately.
+data/landing/*
+!data/landing/.gitkeep
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
