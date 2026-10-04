@@ -22,6 +22,10 @@ databricks bundle run producer_simulator -t dev
 databricks bundle run bronze_ingestion -t dev
 databricks bundle run silver_transformation -t dev
 databricks bundle run gold_aggregation -t dev
+databricks bundle run gold_business -t dev
+
+# Orquestrador: Producer -> Bronze -> Silver -> Gold (auditoria + negócio), numa execução só
+databricks bundle run medallion_pipeline -t dev
 
 # Ambiente local (Python 3.12, exigido por compatibilidade com Databricks Connect 16.4)
 py -3.12 -m pip install -e .
@@ -35,7 +39,7 @@ py -3.12 -m pytest tests/pipeline/test_silver.py::test_normalize_batch_rejection
 
 Não há linter configurado no projeto.
 
-**Testes que usam SparkSession local** (`tests/pipeline/test_silver.py`, `tests/pipeline/test_metrics.py`) exigem uma JVM (JDK) instalada e um `pyspark` capaz de abrir sessão `local[1]`. O `databricks-connect` do `.venv` do projeto bloqueia sessões locais de propósito (só aceita sessões remotas) — nesse ambiente, esses testes são pulados automaticamente (`SKIPPED`) pela fixture `spark` em `tests/conftest.py`, sem falhar a suíte. Para rodá-los de fato, use um ambiente com `pyspark` puro (não `databricks-connect`) e um JDK instalado. Os testes de `tests/pipeline/test_audit.py` e `tests/producer/test_producer_simulator.py` não usam Spark e sempre rodam.
+**Testes que usam SparkSession local** (`tests/pipeline/test_silver.py`, `tests/pipeline/test_metrics.py`) exigem uma JVM (JDK) instalada e um `pyspark` capaz de abrir sessão `local[1]`. O `databricks-connect` do `.venv` do projeto bloqueia sessões locais de propósito (só aceita sessões remotas) — nesse ambiente, esses testes são pulados automaticamente (`SKIPPED`) pela fixture `spark` em `tests/conftest.py`, sem falhar a suíte. Para rodá-los de fato, use um ambiente com `pyspark` puro (não `databricks-connect`) e um JDK instalado. `tests/pipeline/test_gold.py` também usa `SparkSession` local. Rodado contra um cluster (fixture `spark` remota, fuso America/Sao_Paulo), `test_aggregate_file_processing_latency_extracts_timestamp_from_filename` falha por 3 h: ele assume sessão em UTC. Os testes de `tests/pipeline/test_audit.py` e `tests/producer/test_producer_simulator.py` não usam Spark e sempre rodam.
 
 ## Arquitetura
 
@@ -47,7 +51,8 @@ Não há linter configurado no projeto.
 | Bronze | `databricks_course_ws_new.bronze.spotify_events_raw` |
 | Silver | `databricks_course_ws_new.silver.spotify_events` |
 | Silver (quarentena) | `databricks_course_ws_new.silver.spotify_events_quarantine` |
-| Gold | `databricks_course_ws_new.gold.pipeline_run_health`, `databricks_course_ws_new.gold.file_processing_latency`, `databricks_course_ws_new.gold.data_quality_summary` |
+| Gold (auditoria) | `databricks_course_ws_new.gold.pipeline_run_health`, `databricks_course_ws_new.gold.file_processing_latency`, `databricks_course_ws_new.gold.data_quality_summary` |
+| Gold (negócio) | `databricks_course_ws_new.gold.track_popularity_daily`, `databricks_course_ws_new.gold.device_usage_daily`, `databricks_course_ws_new.gold.user_activity_daily`, `databricks_course_ws_new.gold.business_kpi_daily`, `databricks_course_ws_new.gold.field_quality` |
 | Ops | `databricks_course_ws_new.ops.checkpoints_volume` (Volume), `databricks_course_ws_new.ops.pipeline_audit`, `databricks_course_ws_new.ops.file_audit` |
 
 ### Onde fica cada coisa
@@ -55,7 +60,7 @@ Não há linter configurado no projeto.
 - `src/pipeline/`: lógica de transformação **pura e testável** (sem Spark I/O nas funções principais, exceto SparkSession para DataFrames). O critério de estar aqui não é "isso é reusável entre tabelas/pipelines" — é "isso é determinístico (DataFrame in → DataFrame/dict out) e dá pra testar com pytest sem cluster". `silver.py` é específico da tabela `spotify_events` e mesmo assim vive aqui, porque a separação é entre **domínio** (regras de negócio) e **adapter** (I/O, streaming, Delta) — não entre "genérico" e "específico". `metrics.py` e `audit.py` acabam sendo reusados por Bronze e Silver, mas isso é consequência, não o objetivo da pasta.
 - `notebooks/*.py`: orquestração Spark/streaming (o "adapter") — leitura via Auto Loader/`readStream`, `foreachBatch`, `MERGE` Delta, `writeStream`, chamadas de auditoria. Importam a lógica pura de `src/pipeline/` via `sys.path.append` (ver nota abaixo). Um notebook não deve crescer com regras de negócio testáveis embutidas; se uma lógica nova é determinística e vale testar isoladamente, ela nasce em `src/pipeline/`, mesmo que sirva só àquele notebook.
 - `src/producer/producer_simulator.py`: gerador de dados sintéticos, Python puro (sem Spark).
-- `databricks.yml`: define os 4 jobs do bundle e as variáveis (`cluster_id`, `output_dir`, `num_files`).
+- `databricks.yml`: define os jobs do bundle (`producer_simulator`, `bronze_ingestion`, `silver_transformation`, `gold_aggregation`, `gold_business` e o orquestrador `medallion_pipeline`, que encadeia todos com `depends_on`) e as variáveis (`cluster_id`, `output_dir`, `num_files`, `min_records`, `max_records`, `interval_sec`).
 
 **Import de `src/pipeline` nos notebooks:** os jobs do bundle apontam `spark_python_task` diretamente para os arquivos em `notebooks/`, sem instalar o pacote no cluster. Por isso os notebooks fazem `sys.path.append` para o diretório `src/` antes de importar `pipeline.*`. Localmente, `pip install -e .` resolve o mesmo import para pytest (reinstalar depois de mover/renomear a pasta do projeto — o `.egg-link`/path fica com o caminho antigo).
 
@@ -93,15 +98,30 @@ Agregações incrementais (lógica pura em `src/pipeline/gold.py`), todas no mes
 
 Nenhuma das tasks Gold grava em `file_audit` (não fazem sentido métricas por arquivo aqui) — só em `pipeline_audit`, incluindo a linha `batch_id = -1` quando não há incremento novo, no mesmo padrão de Bronze/Silver.
 
+### Gold de negócio (job `gold_business`, notebook `notebooks/gold_business_metrics.py`)
+
+Lógica pura em `src/pipeline/gold.py` (`compute_*`). **Diferente das Gold de auditoria, estas tabelas são recalculadas por inteiro a cada execução** (`overwrite` Delta, atômico), a partir de `silver.spotify_events` (e da quarentena, no `field_quality`). Motivos: a Silver sofre `MERGE` com `UPDATE` (um `readStream` falharia) e `unique_users`/`distinct_tracks` não são somáveis entre execuções. Cada tabela tem auditoria própria (`task_name = gold_business_<tabela>`), com `batch_id = -1` se a Silver estiver vazia (nesse caso as tabelas não são criadas).
+
+- Métricas de negócio consideram só `timestamp_classification IN (ON_TIME, LATE)` e usam `event_date = to_date(event_timestamp)`.
+- `track_popularity_daily` (`event_date, track_id`): plays, duração total/média, `unique_users`.
+- `device_usage_daily` (`event_date, device_type`): plays, duração, `share_pct`. `device_type` nulo vira `unknown`.
+- `user_activity_daily` (`event_date, user_id`): só usuários identificados; plays, duração, `distinct_tracks`.
+- `business_kpi_daily` (`event_date`): plays, `active_users`, duração, `pct_without_user`, `pct_without_device`.
+- `field_quality` (`event_date, field, issue, impact`), por data de **ingestão**: `LOSS` = motivo de rejeição da quarentena mapeado ao campo (`REJECTION_REASON_TO_FIELD`); `DEGRADED` = `user_id`/`device_type` nulos em registros que ficam na Silver. `total_records` = Silver + quarentena do dia; um registro pode ter mais de um problema, então os percentuais por campo não somam 100%.
+
 ### Auditoria
 
 Duas tabelas (`src/pipeline/audit.py::PipelineAudit`): `pipeline_audit` (uma linha por lote/execução) e `file_audit` (uma linha por arquivo processado). Status usados: `SUCCESS`/`FAILED`. Documentação completa e queries prontas em [docs/auditoria.md](docs/auditoria.md) — não duplicar aqui, só consultar quando precisar investigar uma execução.
 
 **Nota sobre `query.recentProgress`:** usado em todos os notebooks para detectar "sem dados novos" (em vez de um contador Python global, que não sobrevive ao isolamento de processo do `foreachBatch` neste cluster Unity Catalog). Cada elemento vem como `dict` neste runtime (Databricks Connect), não como objeto `StreamingQueryProgress` com atributos — acesse com `progress["numInputRows"]`, não `progress.numInputRows`.
 
+### Reset do pipeline (cuidado)
+
+Para recomeçar do zero **não basta `TRUNCATE`**: a Bronze grava com `txnAppId`/`txnVersion` (`batch_id`), e o Delta guarda esse estado no log da tabela. Depois de apagar os checkpoints, o `batch_id` reinicia em 0 e o Delta **descarta as escritas silenciosamente** como reprocessamento, enquanto a auditoria ainda registra `SUCCESS` e `records_inserted` > 0 (esse número reflete o que o lote leu, não o que foi gravado). Procedimento correto: `DROP TABLE` na Bronze, apagar **todos** os diretórios de `ops/checkpoints_volume` (inclui `spotify_events_v2` e `spotify_events_silver_v4`, que são os checkpoints ativos da Bronze/Silver) e `TRUNCATE` Silver, quarentena, Gold de auditoria e as tabelas de `ops` (as Gold de negócio são recriadas por `overwrite`). Arquivos da landing podem ser mantidos: sem checkpoint, são reingeridos.
+
 ### Producer (`src/producer/producer_simulator.py`)
 
-Gera cenários de sujeira de dados por índice `i` do registro dentro do lote (`build_record(i, ...)`):
+Gera cenários de sujeira de dados por índice `i` do registro dentro do lote (`build_record(i, ...)`). `user_id` (pool de 100) e `track_id` (pool de 60) são **sorteados com pesos decrescentes**, não derivados de `i`, para que existam faixas populares e usuários que ouvem várias faixas:
 
 | Condição | Cenário |
 | --- | --- |
@@ -110,13 +130,9 @@ Gera cenários de sujeira de dados por índice `i` do registro dentro do lote (`
 | `i % 7 == 0` | `user_id` ausente (chave removida) |
 | `i == 9` | `duration_played_sec = "INVALID_DURATION"` (tipo inconsistente) |
 | `i % 5 == 0` e `i != 0` | `duration_played_sec = -10` (fora do domínio) |
-| `i % 6 == 0` e `i != 0` | timestamp atrasado (-2 dias) |
+| `i % 13 == 0` e `i != 0` | timestamp atrasado (-2 dias) — divisor coprimo com os demais para não coincidir sempre com `user_id` nulo |
 | `i % 11 == 0` | timestamp futuro (+1 dia) |
 | `i % 10 == 0` e `i != 0` | `track_id`/`platform` vazios |
 | último registro de cada lote | duplicata conflitante de `records[0]` (mesmo `event_id`, `duration_played_sec=999999`, `user_id="usr_conflict"`) — testa o desempate da Silver |
 
-Gera lotes JSON Lines (não é streaming em tempo real — simula uma fonte incremental baseada em arquivos).
-
-## Próximo projeto (Free Edition)
-
-O plano para replicar o contrato funcional da Silver em um workspace Databricks Free Edition separado, usando Lakeflow Declarative Pipelines + Expectations em vez de PySpark manual, vive em outro repositório (`databricks-declarative-quality`, pasta irmã deste projeto). É um projeto/repositório distinto — não misturar credenciais, catálogo ou cluster com este.
+Parâmetros: `--num-files`, `--min-records`/`--max-records` (registros por arquivo) e `--interval-sec` (pausa entre arquivos, mínimo 1: o nome do arquivo tem resolução de segundos). Gera lotes JSON Lines (não é streaming em tempo real — simula uma fonte incremental baseada em arquivos).

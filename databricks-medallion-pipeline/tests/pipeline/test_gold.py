@@ -3,6 +3,11 @@ from datetime import datetime, timedelta, timezone
 from pyspark.sql.types import IntegerType, LongType, StringType, StructField, StructType, TimestampType
 
 from pipeline.gold import (
+    compute_business_kpi,
+    compute_device_usage,
+    compute_field_quality,
+    compute_track_popularity,
+    compute_user_activity,
     aggregate_file_processing_latency,
     aggregate_pipeline_run_health,
     aggregate_rejection_reasons,
@@ -145,3 +150,131 @@ def test_aggregate_timestamp_classifications_counts_per_category(spark):
     result = {row["category"]: row["records_count"] for row in aggregate_timestamp_classifications(df).collect()}
 
     assert result == {"ON_TIME": 2, "LATE": 1}
+
+
+# --- Gold de negócio (recalculadas por inteiro a partir da Silver/quarentena) ---
+
+BUSINESS_SILVER_SCHEMA = StructType([
+    StructField("track_id", StringType()),
+    StructField("user_id", StringType()),
+    StructField("device_type", StringType()),
+    StructField("duration_played_sec", IntegerType()),
+    StructField("event_timestamp", TimestampType()),
+    StructField("timestamp_classification", StringType()),
+    StructField("_ingested_at", TimestampType()),
+])
+
+QUARANTINE_FIELD_SCHEMA = StructType([
+    StructField("rejection_reason", StringType()),
+    StructField("_ingested_at", TimestampType()),
+])
+
+
+def _silver_event(track="trk_1", user="usr_1", device="mobile", duration=100, classification="ON_TIME"):
+    now = _now()
+    return (track, user, device, duration, now, classification, now)
+
+
+def _silver_df(spark, events):
+    return spark.createDataFrame(events, BUSINESS_SILVER_SCHEMA)
+
+
+def test_compute_track_popularity_counts_plays_and_unique_users(spark):
+    df = _silver_df(spark, [
+        _silver_event(track="trk_1", user="usr_1", duration=100),
+        _silver_event(track="trk_1", user="usr_1", duration=200),
+        _silver_event(track="trk_1", user="usr_2", duration=300),
+        _silver_event(track="trk_1", user=None, duration=400),
+        _silver_event(track="trk_2", user="usr_1", duration=50),
+    ])
+
+    result = {row["track_id"]: row for row in compute_track_popularity(df).collect()}
+
+    assert result["trk_1"]["plays_count"] == 4
+    assert result["trk_1"]["total_duration_sec"] == 1000
+    # user_id nulo não conta como usuário distinto.
+    assert result["trk_1"]["unique_users"] == 2
+    assert result["trk_2"]["plays_count"] == 1
+
+
+def test_business_metrics_ignore_future_and_invalid_timestamps(spark):
+    df = _silver_df(spark, [
+        _silver_event(classification="ON_TIME"),
+        _silver_event(classification="LATE"),
+        _silver_event(classification="FUTURE"),
+        _silver_event(classification="INVALID"),
+    ])
+
+    assert compute_track_popularity(df).collect()[0]["plays_count"] == 2
+
+
+def test_compute_device_usage_maps_null_to_unknown_with_share(spark):
+    df = _silver_df(spark, [
+        _silver_event(device="mobile"),
+        _silver_event(device=None),
+        _silver_event(device=None),
+        _silver_event(device=None),
+    ])
+
+    result = {row["device_type"]: row for row in compute_device_usage(df).collect()}
+
+    assert result["unknown"]["plays_count"] == 3
+    assert result["unknown"]["share_pct"] == 75.0
+    assert result["mobile"]["share_pct"] == 25.0
+
+
+def test_compute_user_activity_excludes_events_without_user(spark):
+    df = _silver_df(spark, [
+        _silver_event(user="usr_1", track="trk_1"),
+        _silver_event(user="usr_1", track="trk_2"),
+        _silver_event(user=None),
+    ])
+
+    result = compute_user_activity(df).collect()
+
+    assert len(result) == 1
+    assert result[0]["user_id"] == "usr_1"
+    assert result[0]["plays_count"] == 2
+    assert result[0]["distinct_tracks"] == 2
+
+
+def test_compute_business_kpi_reports_field_coverage(spark):
+    df = _silver_df(spark, [
+        _silver_event(user="usr_1", device="mobile", duration=100),
+        _silver_event(user="usr_2", device=None, duration=300),
+        _silver_event(user=None, device=None, duration=200),
+        _silver_event(user=None, device=None, duration=400),
+    ])
+
+    row = compute_business_kpi(df).collect()[0]
+
+    assert row["plays_count"] == 4
+    assert row["active_users"] == 2
+    assert row["total_duration_sec"] == 1000
+    assert row["avg_duration_sec"] == 250.0
+    assert row["pct_without_user"] == 50.0
+    assert row["pct_without_device"] == 75.0
+
+
+def test_compute_field_quality_separates_loss_from_degradation(spark):
+    now = _now()
+    silver = _silver_df(spark, [
+        _silver_event(user=None, device=None),
+        _silver_event(user="usr_1", device="mobile"),
+    ])
+    quarantine = spark.createDataFrame([
+        ("INVALID_TRACK_ID; INVALID_PLATFORM", now),
+        ("NEGATIVE_DURATION", now),
+    ], QUARANTINE_FIELD_SCHEMA)
+
+    rows = {(r["field"], r["issue"]): r for r in compute_field_quality(silver, quarantine).collect()}
+
+    # total = 2 na Silver + 2 na quarentena
+    assert rows[("track_id", "INVALID_TRACK_ID")]["impact"] == "LOSS"
+    assert rows[("track_id", "INVALID_TRACK_ID")]["total_records"] == 4
+    assert rows[("track_id", "INVALID_TRACK_ID")]["pct_of_total"] == 25.0
+    assert rows[("platform", "INVALID_PLATFORM")]["records_count"] == 1
+    # NEGATIVE_DURATION é atribuído ao campo duration_played_sec.
+    assert rows[("duration_played_sec", "NEGATIVE_DURATION")]["impact"] == "LOSS"
+    assert rows[("user_id", "MISSING_USER_ID")]["impact"] == "DEGRADED"
+    assert rows[("device_type", "MISSING_DEVICE_TYPE")]["records_count"] == 1

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from producer.producer_simulator import build_record
+from producer.producer_simulator import TRACK_POOL, USER_POOL, build_record
 
 # Cada teste cobre uma condição i % N da tabela de cenários em CLAUDE.md (seção
 # "Producer"); build_record(i, ...) é a função pura extraída do loop original.
@@ -15,11 +15,28 @@ def test_build_record_baseline_is_valid():
     # i=1 não cai em nenhuma regra i % N -> registro "limpo", usado como referência.
     record = build_record(1, _event_timestamp(), BATCH_ID)
     assert record["event_id"] == f"evt_{BATCH_ID}_1"
-    assert record["user_id"] == "usr_101"
-    assert record["track_id"] == "trk_51"
+    # user_id e track_id são sorteados dos pools, não derivados do índice.
+    assert record["user_id"] in USER_POOL
+    assert record["track_id"] in TRACK_POOL
     assert record["platform"] == "spotify_clone"
     assert record["duration_played_sec"] == 181
     assert "device_type" not in record
+
+
+def test_build_record_ids_are_not_tied_to_the_index():
+    # Regressão: user_id/track_id derivados de i faziam cada usuário ouvir uma única faixa.
+    pairs = {
+        (r["user_id"], r["track_id"])
+        for r in (build_record(1, _event_timestamp(), BATCH_ID) for _ in range(200))
+    }
+    assert len({user for user, _ in pairs}) > 1
+    assert len({track for _, track in pairs}) > 1
+
+
+def test_build_record_late_events_can_have_a_user():
+    # i=13 é atrasado e não cai em i % 3 nem i % 7: deve manter user_id.
+    record = build_record(13, _event_timestamp(), BATCH_ID)
+    assert record["user_id"] in USER_POOL
 
 
 def test_build_record_null_user_id():
@@ -53,15 +70,15 @@ def test_build_record_negative_duration():
 
 
 def test_build_record_late_timestamp():
-    # i % 6 == 0 e i != 0
+    # i % 13 == 0 e i != 0
     base = _event_timestamp()
-    record = build_record(6, base, BATCH_ID)
+    record = build_record(13, base, BATCH_ID)
     parsed = datetime.strptime(record["timestamp"], "%Y-%m-%dT%H:%M:%S%z")
     assert parsed < base
 
 
 def test_build_record_future_timestamp():
-    # i % 11 == 0 e i % 6 != 0
+    # i % 11 == 0 e i % 13 != 0
     base = _event_timestamp()
     record = build_record(11, base, BATCH_ID)
     parsed = datetime.strptime(record["timestamp"], "%Y-%m-%dT%H:%M:%S%z")
