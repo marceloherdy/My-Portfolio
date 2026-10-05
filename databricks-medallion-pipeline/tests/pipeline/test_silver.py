@@ -52,7 +52,7 @@ def _build_df(spark, *rows):
     return spark.createDataFrame([dict(r) for r in rows], SCHEMA)
 
 
-# One case per quarantine reason documented in CLAUDE.md (rejection_reason).
+# One case per quarantine reason listed in the README (rejection_reason).
 @pytest.mark.parametrize(
     "overrides, expected_reason",
     [

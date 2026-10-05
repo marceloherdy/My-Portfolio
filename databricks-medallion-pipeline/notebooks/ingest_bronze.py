@@ -80,7 +80,7 @@ def process_batch(batch_df, batch_id):
         if records_inserted != records_read:
             raise RuntimeError(
                 f"Bronze wrote {records_inserted} rows, but batch {batch_id} read {records_read}. "
-                "If the checkpoints were deleted, drop the Bronze table (see CLAUDE.md, 'Reset do pipeline')."
+                "If the checkpoints were deleted, drop the Bronze table (see 'Resetting the pipeline' in the README)."
             )
         audit.write_files(file_metrics, batch_id, "SUCCESS")
         finished_at = audit.utc_now()

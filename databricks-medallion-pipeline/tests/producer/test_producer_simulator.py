@@ -2,8 +2,8 @@ from datetime import datetime, timedelta, timezone
 
 from producer.producer_simulator import TRACK_POOL, USER_POOL, build_record, random_event_timestamp
 
-# Each test covers one i % N condition of the scenario table in CLAUDE.md (section
-# "Producer"); build_record(i, ...) is the pure function extracted from the original loop.
+# Each test covers one i % N condition of the scenario table in the README (section
+# "Data quality scenarios"); build_record(i, ...) is the pure function extracted from the original loop.
 BATCH_ID = "batch_test"
 
 
