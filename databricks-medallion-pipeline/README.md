@@ -1,3 +1,5 @@
+**English** | [Português](README.pt-BR.md)
+
 # Databricks Medallion Pipeline
 
 ![Python](https://img.shields.io/badge/python-3.12-blue)
@@ -86,7 +88,9 @@ The `landing` volume stores the source files. The `ops` volume keeps the Auto Lo
 │   └── medallion.lvdash.json   # AI/BI dashboard (3 pages), deployed by the bundle
 └── docs/
     ├── auditing.md
-    └── error-handling.md
+    ├── auditing.pt-BR.md       # Portuguese version
+    ├── error-handling.md
+    └── error-handling.pt-BR.md # Portuguese version
 ```
 
 The notebooks only orchestrate (reading, `foreachBatch`, `MERGE`, writes and auditing). Deterministic business rules live in `src/pipeline/` so they can be tested locally.

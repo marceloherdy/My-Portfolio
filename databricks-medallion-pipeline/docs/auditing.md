@@ -1,10 +1,12 @@
+**English** | [Português](auditing.pt-BR.md)
+
 # Pipeline Auditing
 
 ## Purpose
 
 The pipeline records operational metrics for every stage so runs can be monitored, failures diagnosed and processed files traced.
 
-Auditing lives in the `databricks_course_ws_new.ops` schema and has two levels:
+Auditing lives in the `ops` schema of the project catalog and has two levels:
 
 - `pipeline_audit`: one row per batch, or per execution that found no new data.
 - `file_audit`: one row per file processed in each batch.
@@ -63,6 +65,8 @@ Detailed view of the processing. Use it to find out which files were processed a
 
 ## Useful queries
 
+The queries use `your_catalog` as a placeholder for the catalog of the project; replace it with yours (in this repository, `databricks_course_ws_new`).
+
 ### Latest executions
 
 ```sql
@@ -79,7 +83,7 @@ SELECT
     schema_drift_records,
     started_at,
     finished_at
-FROM databricks_course_ws_new.ops.pipeline_audit
+FROM your_catalog.ops.pipeline_audit
 ORDER BY finished_at DESC;
 ```
 
@@ -95,10 +99,10 @@ SELECT
     records_inserted,
     schema_drift_records,
     processed_at
-FROM databricks_course_ws_new.ops.file_audit
+FROM your_catalog.ops.file_audit
 WHERE run_id = (
     SELECT run_id
-    FROM databricks_course_ws_new.ops.pipeline_audit
+    FROM your_catalog.ops.pipeline_audit
     ORDER BY finished_at DESC
     LIMIT 1
 )
@@ -115,7 +119,7 @@ SELECT
     target_table,
     error_message,
     processed_at
-FROM databricks_course_ws_new.ops.file_audit
+FROM your_catalog.ops.file_audit
 WHERE status = 'FAILED'
 ORDER BY processed_at DESC;
 ```
@@ -127,7 +131,7 @@ SELECT
     run_id,
     finished_at,
     status
-FROM databricks_course_ws_new.ops.pipeline_audit
+FROM your_catalog.ops.pipeline_audit
 WHERE batch_id = -1
 ORDER BY finished_at DESC;
 ```
