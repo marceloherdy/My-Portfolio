@@ -30,7 +30,7 @@ Highlights:
 - **Idempotent** Delta writes and deduplication with a deterministic tie-break.
 - **Auditing** per batch and per file, plus Gold tables for pipeline observability.
 - **Business Gold tables** (popularity, device usage, user activity, KPIs and a per-field data quality report).
-- A **single orchestrator job** that chains every stage.
+- A **single orchestrator job** that chains Bronze, Silver and Gold, plus a separate producer job that simulates the arrival of files.
 - Pure transformation logic in `src/pipeline/`, covered by `pytest` without a cluster.
 
 ## Architecture
@@ -64,6 +64,8 @@ The `landing` volume stores the source files. The `ops` volume keeps the Auto Lo
 ```text
 .
 ├── databricks.yml          # Asset Bundle: jobs, dashboard and variables
+├── pyproject.toml          # Project metadata and Databricks Connect environment settings
+├── setup.py                # Makes src/ importable (pip install -e .)
 ├── notebooks/              # Orchestration (Spark / streaming adapters)
 │   ├── ingest_bronze.py
 │   ├── silver_transform.py
@@ -108,7 +110,7 @@ pip install "databricks-connect~=16.4.0" "pytest~=8.3.0"
 pip install -e .
 ```
 
-`pip install -e .` alone does not install the dependencies: they are declared in the `dev` group of `pyproject.toml`, which `pip` does not read by default.
+`pip install -e .` alone does not install the dependencies: they are declared in the `dev` group of `pyproject.toml`, which `pip` does not read by default. `uv sync` is not supported: the `dev` group conflicts with versions pinned by Databricks in `pyproject.toml`. Use `pip` as described above.
 
 ### Configuration
 
@@ -131,16 +133,27 @@ databricks bundle validate -t dev
 databricks bundle deploy -t dev
 ```
 
-Run the whole pipeline (producer, Bronze, Silver, then the Gold tasks) with the orchestrator job:
+The producer job (`producer_simulator`) only simulates files arriving in the landing volume; it is not part of the ingestion. Run it to generate new files:
+
+```powershell
+databricks bundle run producer_simulator -t dev
+```
+
+The orchestrator job (`medallion_pipeline`) chains Bronze, Silver and the Gold tasks, and is what would be scheduled in production:
 
 ```powershell
 databricks bundle run medallion_pipeline -t dev
 ```
 
-Or run each stage on its own:
+To see the whole flow end to end, run the demo job (`demo_end_to_end`), which runs the producer and then the orchestrator:
 
 ```powershell
-databricks bundle run producer_simulator -t dev
+databricks bundle run demo_end_to_end -t dev
+```
+
+Or run each stage of the pipeline on its own:
+
+```powershell
 databricks bundle run bronze_ingestion -t dev
 databricks bundle run silver_transformation -t dev
 databricks bundle run gold_aggregation -t dev
@@ -153,7 +166,7 @@ The volume of generated data is controlled by the bundle variables `num_files`, 
 
 ```powershell
 databricks bundle deploy -t dev --var="days_back=7"
-databricks bundle run medallion_pipeline -t dev
+databricks bundle run demo_end_to_end -t dev
 databricks bundle deploy -t dev
 ```
 
@@ -281,4 +294,8 @@ The `silver.py` and `gold.py` tests need a local `SparkSession` (which requires 
 ## Roadmap
 
 - Close the loop on bad records: a status for quarantined rows and a `reprocess_quarantine` job. See [docs/error-handling.md](docs/error-handling.md) for how teams handle rescued and quarantined data and a design proposal.
-- Replicate the Silver contract with Lakeflow Declarative Pipelines and Expectations in a separate project (`databricks-declarative-quality`).
+- Plan the catalog layout before starting a new project. This workspace shares one catalog across several portfolio projects, so schemas named after the layers (`bronze`, `silver`, `gold`) end up mixing tables from different projects. One option is a catalog per project, and in any case the catalog name should be a bundle variable instead of being hard-coded in notebooks, dashboard queries and docs. This is a reminder that comes from the portfolio setup, not a general recommendation: in a company the catalog usually follows environments or business domains.
+
+## About this project
+
+Developed with the assistance of an AI coding assistant; architecture, data-quality rules and validation against a real workspace were driven and reviewed by the author.
