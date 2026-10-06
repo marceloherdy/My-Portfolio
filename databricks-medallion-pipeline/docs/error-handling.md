@@ -1,3 +1,5 @@
+**English** | [Português](error-handling.pt-BR.md)
+
 # Handling rescued and quarantined records
 
 This document explains what the pipeline does with records that have problems, how data teams usually handle them after a daily load, and what is still missing in this project to close the loop. The last section is a design proposal that has **not** been implemented, and is a good starting point for anyone who wants to extend the project.
@@ -37,7 +39,7 @@ Mostly by queries, but guided: group by type of problem (rejection reason, field
 - **A bug in the pipeline or in a rule**: fix the code.
 - **Genuinely bad data**: it stays rejected and is only monitored.
 
-Example queries for this project:
+Example queries for this project (they use `your_catalog` as a placeholder for the catalog of the project; replace it with yours, in this repository `databricks_course_ws_new`):
 
 ```sql
 -- Share of Bronze records with rescued data, per ingestion day
@@ -45,20 +47,20 @@ SELECT to_date(_ingested_at) AS ingestion_date,
        count(*) AS records,
        count_if(_rescued_data IS NOT NULL) AS rescued_records,
        round(100 * count_if(_rescued_data IS NOT NULL) / count(*), 2) AS rescued_pct
-FROM databricks_course_ws_new.bronze.spotify_events_raw
+FROM your_catalog.bronze.spotify_events_raw
 GROUP BY 1
 ORDER BY 1 DESC;
 
 -- Which files carry the rescued data
 SELECT _source_file, count(*) AS rescued_records
-FROM databricks_course_ws_new.bronze.spotify_events_raw
+FROM your_catalog.bronze.spotify_events_raw
 WHERE _rescued_data IS NOT NULL
 GROUP BY 1
 ORDER BY 2 DESC;
 
 -- Quarantine by day and reason
 SELECT to_date(rejected_at) AS rejected_date, rejection_reason, count(*) AS records
-FROM databricks_course_ws_new.silver.spotify_events_quarantine
+FROM your_catalog.silver.spotify_events_quarantine
 GROUP BY 1, 2
 ORDER BY 1 DESC, 3 DESC;
 
@@ -66,9 +68,9 @@ ORDER BY 1 DESC, 3 DESC;
 SELECT q.event_date, q.quarantined, s.accepted,
        round(100 * q.quarantined / (q.quarantined + s.accepted), 2) AS quarantine_pct
 FROM (SELECT to_date(_ingested_at) AS event_date, count(*) AS quarantined
-      FROM databricks_course_ws_new.silver.spotify_events_quarantine GROUP BY 1) q
+      FROM your_catalog.silver.spotify_events_quarantine GROUP BY 1) q
 JOIN (SELECT to_date(_ingested_at) AS event_date, count(*) AS accepted
-      FROM databricks_course_ws_new.silver.spotify_events GROUP BY 1) s USING (event_date)
+      FROM your_catalog.silver.spotify_events GROUP BY 1) s USING (event_date)
 ORDER BY 1 DESC;
 ```
 
@@ -78,7 +80,7 @@ ORDER BY 1 DESC;
 
 - The raw data in Bronze is immutable and retained, precisely so it can be reprocessed.
 - Quarantined records stay and carry a status, for example `PENDING`, `RESOLVED` or `DISCARDED`, sometimes with the resolution date and the person or job responsible.
-- Once the problem is fixed, the rejected records are **replayed**: read again, validated with the corrected rule and merged into Silver with an idempotent `MERGE`, so nothing is duplicated.
+- Once the problem is fixed, the rejected records are **replayed**: read again, validated with the corrected rule and merged into Silver with an idempotent `MERGE`, so nothing is duplicated. Because the file has already been read, the regular load does not pick these records up again (ingestion and the Silver stream track what they have processed), so replaying them needs a separate reprocessing process.
 - Deletion happens only through a retention policy (for example after 90 days) or a legal requirement, never because the record was fixed.
 
 ### 5. Closing

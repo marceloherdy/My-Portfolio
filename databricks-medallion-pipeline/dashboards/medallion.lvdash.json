@@ -138,7 +138,7 @@
             "name": "7a9badb2",
             "multilineTextboxSpec": {
               "lines": [
-                "Runs, failures and processing latency, from the audit Gold tables (`pipeline_run_health`, `file_processing_latency`)."
+                "<span style=\"font-size: 18px;font-weight: 700;\">Runs, failures and processing latency, from the audit Gold tables (</span><span style=\"font-size: 18px;font-weight: 700;\">`pipeline_run_health`</span><span style=\"font-size: 18px;font-weight: 700;\">,  </span><span style=\"font-size: 18px;font-weight: 700;\">`file_processing_latency`</span><span style=\"font-size: 18px;font-weight: 700;\">).</span>"
               ]
             }
           },
@@ -420,7 +420,7 @@
             "name": "16121c8f",
             "multilineTextboxSpec": {
               "lines": [
-                "Records lost to quarantine (`LOSS`) versus kept with a null field (`DEGRADED`). A record can have more than one problem, so the bars do not add up to the total."
+                "<span style=\"font-size: 18px;font-weight: 700;\">Records lost to quarantine (</span><span style=\"font-size: 18px;font-weight: 700;\">`LOSS`</span><span style=\"font-size: 18px;font-weight: 700;\">) versus kept with a null field (</span><span style=\"font-size: 18px;font-weight: 700;\">`DEGRADED`</span><span style=\"font-size: 18px;font-weight: 700;\">). A record can have more than one problem, so the bars do not add up to the total.</span>"
               ]
             }
           },
@@ -761,7 +761,7 @@
             "name": "84139f55",
             "multilineTextboxSpec": {
               "lines": [
-                "Listening activity from the business Gold tables. Only `ON_TIME` and `LATE` events are counted."
+                "<span style=\"font-size: 18px;font-weight: 700;\">Listening activity from the business Gold tables. Only  </span><span style=\"font-size: 18px;font-weight: 700;\">`ON_TIME`</span><span style=\"font-size: 18px;font-weight: 700;\"> and  </span><span style=\"font-size: 18px;font-weight: 700;\">`LATE`</span><span style=\"font-size: 18px;font-weight: 700;\"> events are counted.</span>"
               ]
             }
           },

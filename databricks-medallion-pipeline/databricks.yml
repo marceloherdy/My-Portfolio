@@ -47,26 +47,7 @@ resources:
       name: ${bundle.name}-${bundle.target}-pipeline
       max_concurrent_runs: 1
       tasks:
-        - task_key: generate_landing_events
-          existing_cluster_id: ${var.cluster_id}
-          spark_python_task:
-            python_file: src/producer/producer_simulator.py
-            parameters:
-              - --output-dir
-              - ${var.output_dir}
-              - --num-files
-              - ${var.num_files}
-              - --min-records
-              - ${var.min_records}
-              - --max-records
-              - ${var.max_records}
-              - --interval-sec
-              - ${var.interval_sec}
-              - --days-back
-              - ${var.days_back}
         - task_key: ingest_bronze
-          depends_on:
-            - task_key: generate_landing_events
           existing_cluster_id: ${var.cluster_id}
           spark_python_task:
             python_file: notebooks/ingest_bronze.py
@@ -100,6 +81,21 @@ resources:
           existing_cluster_id: ${var.cluster_id}
           spark_python_task:
             python_file: notebooks/gold_business_metrics.py
+
+    # Demo only: simulates files arriving, then runs the pipeline on them. In a real
+    # deployment the files arrive on their own and only medallion_pipeline is scheduled.
+    demo_end_to_end:
+      name: ${bundle.name}-${bundle.target}-demo
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: simulate_arrival
+          run_job_task:
+            job_id: ${resources.jobs.producer_simulator.id}
+        - task_key: run_pipeline
+          depends_on:
+            - task_key: simulate_arrival
+          run_job_task:
+            job_id: ${resources.jobs.medallion_pipeline.id}
 
     producer_simulator:
       name: ${bundle.name}-${bundle.target}-producer
